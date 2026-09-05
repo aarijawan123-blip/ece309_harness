@@ -1,0 +1,11 @@
+# Generated executables and submission archive
+/harness
+/harness_asan
+*.exe
+*.o
+/github.zip
+
+# Temporary PDF inspection and validation output
+/tmp/
+.DS_Store
+Thumbs.db

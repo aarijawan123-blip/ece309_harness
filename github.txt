@@ -1,0 +1,6 @@
+REPLACE THIS FILE WITH YOUR ACTUAL GITHUB REPOSITORY URL AFTER PUBLISHING.
+Create a GitHub repository, push this project, and replace all text in this
+file with the direct repository URL copied from your browser (one line).
+Then commit and push the updated github.txt and regenerate github.zip.
+See README.md for the exact publishing and submission commands.
+This placeholder is not a valid final submission URL.
