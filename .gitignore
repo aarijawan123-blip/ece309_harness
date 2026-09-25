@@ -5,6 +5,12 @@
 *.o
 /github.zip
 
+# Project 2: out-of-source CMake builds and generated session output
+/build/
+/build-*/
+/cmake-build-*/
+/transcript.txt
+
 # Temporary PDF inspection and validation output
 /tmp/
 .DS_Store

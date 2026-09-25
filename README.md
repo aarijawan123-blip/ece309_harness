@@ -1,3 +1,61 @@
+# ECE 309 Harness Projects
+
+This repository contains Project 1 and the Project 2 starter in the same
+workspace. Project 1's source, tests, and development log remain at the root.
+Its original documentation is preserved below under **Project 1 reference**;
+the old submission/setup instructions there describe the earlier project.
+
+## Project 2: The Conversation Loop
+
+**Current stage: Part 1, workspace setup only.** The supplied starter files have
+been imported from `ece309-project2-starter.zip`. No student classes or tests
+have been implemented yet. The original starter README is preserved at
+[`docs/p2-starter-README.md`](docs/p2-starter-README.md).
+
+### Layout and ownership
+
+| Path | Responsibility |
+| --- | --- |
+| `CMakeLists.txt` | Provided C++17 build with warnings, AddressSanitizer, and UndefinedBehaviorSanitizer. Change only if adding our own source files. |
+| `include/model/`, `include/harness/` | Provided interfaces; leave unchanged. |
+| `src/model_client.cpp`, `src/scripted_client.cpp`, `src/replay_client.cpp` | Provided model implementations; leave unchanged. |
+| `src/harness.cpp`, `src/main.cpp` | Provided execution loop and CLI; leave unchanged. |
+| `scripts/greeting.script` | Provided example conversation. |
+| `include/core/message.h` | To be created in Part 2. |
+| `include/core/conversation.h`, `src/conversation.cpp` | To be created in Part 3. |
+| `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | To be created in Part 4. |
+| `tests/p2/test_p2.cpp` | Provided placeholder; we will add unit and integration tests. |
+| `docs/design-log-p2.md` | Provided outline; we will write the required 500-800-word design log. |
+
+The missing core files are intentional at this stage. Despite the starter test
+comment saying it builds out of the box, this ZIP omits the core headers and
+implementations. A full CMake build cannot succeed until those are implemented.
+No placeholder implementations have been added to hide that dependency.
+
+### Development parts
+
+Each part gets its own commit: (1) workspace setup, (2) Message, (3) Conversation
+and its tests, (4) SentinelScanner and its tests, (5) harness integration tests,
+(6) final documentation, and (7) final validation and submission preparation.
+Keep design notes as implementation proceeds, then finalize the design log.
+
+### Build and run once the core classes are implemented
+
+Run these commands from the repository root in Linux or Ubuntu WSL:
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/test_p2
+./build/miniharness --script scripts/greeting.script --save transcript.txt
+```
+
+The starter does not register CTest tests; run `test_p2` directly. Build
+directories and the example generated transcript are ignored by Git. Project 1
+still builds with `gcc harness.c -o harness` and uses `bash test.sh`.
+
+## Project 1 reference
+
 # ECE 309 Project 1: Mini LLM Harness in C
 
 A small terminal program that demonstrates what an LLM agent harness does:
