@@ -7,9 +7,9 @@ the old submission/setup instructions there describe the earlier project.
 
 ## Project 2: The Conversation Loop
 
-**Current stage: Part 2, Message implemented.** The supplied starter files have
+**Current stage: Part 3, Message and Conversation implemented.** The starter files have
 been imported from `ece309-project2-starter.zip`. The Message class has standalone
-checks; Conversation and SentinelScanner are still pending. The starter README is at
+checks, as does Conversation; SentinelScanner is still pending. The starter README is at
 [`docs/p2-starter-README.md`](docs/p2-starter-README.md).
 
 ### Layout and ownership
@@ -23,7 +23,8 @@ checks; Conversation and SentinelScanner are still pending. The starter README i
 | `scripts/greeting.script` | Provided example conversation. |
 | `include/core/message.h` | Implemented in Part 2: roles, constructors, and const accessors. |
 | `tests/p2/test_message.cpp` | Standalone Message checks, independent of the unfinished core classes. |
-| `include/core/conversation.h`, `src/conversation.cpp` | To be created in Part 3. |
+| `include/core/conversation.h`, `src/conversation.cpp` | Implemented in Part 3: growable array and Rule of Five. |
+| `tests/p2/test_conversation.cpp` | Standalone bounds, growth, ordering, copy, move, and ownership checks. |
 | `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | To be created in Part 4. |
 | `tests/p2/test_p2.cpp` | Provided placeholder; we will add unit and integration tests. |
 | `docs/design-log-p2.md` | Provided outline; we will write the required 500-800-word design log. |
@@ -49,6 +50,30 @@ These checks cover default construction (including array slots), all roles,
 empty and multiline content, independent string ownership, and accessor
 signatures. They are separate from the full assignment test suite, which will
 be developed in the later parts.
+
+### Checking Part 3 independently
+
+```bash
+mkdir -p build
+g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
+  -fsanitize=address,undefined -Iinclude src/conversation.cpp \
+  tests/p2/test_conversation.cpp -o build/test_conversation
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_conversation
+```
+
+Conversation starts without an allocation and grows through capacities 1, 2,
+4, 8, and so on. It keeps all messages; Project 1's five-turn limit does not
+apply to Project 2. `at()` throws `std::out_of_range` for invalid indices.
+A System message is accepted only as the first message; later System messages
+throw `std::invalid_argument`. Nothing is evicted. Copying owns independent
+storage, and moving leaves the source empty and reusable. Self-assignment is safe.
+Growth invalidates pointers into the old array. A private friend grants the
+tests access to capacity without changing the required public interface.
+
+The eight test groups check these contracts, including growth through 4,097
+messages, retained role/content order, copying long strings, moves into populated
+objects, empty sources, and appending an existing element during reallocation.
+The full CMake build still requires SentinelScanner in Part 4.
 
 ### Development parts
 
