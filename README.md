@@ -7,9 +7,9 @@ the old submission/setup instructions there describe the earlier project.
 
 ## Project 2: The Conversation Loop
 
-**Current stage: Part 1, workspace setup only.** The supplied starter files have
-been imported from `ece309-project2-starter.zip`. No student classes or tests
-have been implemented yet. The original starter README is preserved at
+**Current stage: Part 2, Message implemented.** The supplied starter files have
+been imported from `ece309-project2-starter.zip`. The Message class has standalone
+checks; Conversation and SentinelScanner are still pending. The starter README is at
 [`docs/p2-starter-README.md`](docs/p2-starter-README.md).
 
 ### Layout and ownership
@@ -21,7 +21,8 @@ have been implemented yet. The original starter README is preserved at
 | `src/model_client.cpp`, `src/scripted_client.cpp`, `src/replay_client.cpp` | Provided model implementations; leave unchanged. |
 | `src/harness.cpp`, `src/main.cpp` | Provided execution loop and CLI; leave unchanged. |
 | `scripts/greeting.script` | Provided example conversation. |
-| `include/core/message.h` | To be created in Part 2. |
+| `include/core/message.h` | Implemented in Part 2: roles, constructors, and const accessors. |
+| `tests/p2/test_message.cpp` | Standalone Message checks, independent of the unfinished core classes. |
 | `include/core/conversation.h`, `src/conversation.cpp` | To be created in Part 3. |
 | `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | To be created in Part 4. |
 | `tests/p2/test_p2.cpp` | Provided placeholder; we will add unit and integration tests. |
@@ -31,6 +32,23 @@ The missing core files are intentional at this stage. Despite the starter test
 comment saying it builds out of the box, this ZIP omits the core headers and
 implementations. A full CMake build cannot succeed until those are implemented.
 No placeholder implementations have been added to hide that dependency.
+
+### Checking Part 2 independently
+
+The small Message class is defined in its header, so no extra source file or
+change to the provided CMake configuration is needed. From Linux/Ubuntu WSL:
+
+```bash
+mkdir -p build
+g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
+  -fsanitize=address,undefined -Iinclude tests/p2/test_message.cpp -o build/test_message
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_message
+```
+
+These checks cover default construction (including array slots), all roles,
+empty and multiline content, independent string ownership, and accessor
+signatures. They are separate from the full assignment test suite, which will
+be developed in the later parts.
 
 ### Development parts
 
