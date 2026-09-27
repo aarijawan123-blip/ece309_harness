@@ -1,61 +1,166 @@
 # ECE 309 Harness Projects
 
-This repository contains Project 1 and the Project 2 starter in the same
-workspace. Project 1's source, tests, and development log remain at the root.
-Its original documentation is preserved below under **Project 1 reference**;
-the old submission/setup instructions there describe the earlier project.
+Project 2 is a C++17 conversation harness with a custom growable message array
+and streaming stop-sentinel detection. It uses deterministic scripted/replay
+clients, with no network connection or model API required.
 
-## Project 2: The Conversation Loop
+**Status:** Parts 1-6 are complete: setup, Message, Conversation, SentinelScanner,
+integration tests, and documentation. Part 7 is the final audit and submission
+packaging. Each part has its own commit.
 
-**Current stage: Part 5, component and integration tests assembled.** The starter files
-were imported from `ece309-project2-starter.zip`. Message, Conversation, and
-SentinelScanner are tested together with the provided harness. The starter README is at
-[`docs/p2-starter-README.md`](docs/p2-starter-README.md).
+Project 1 remains at the repository root. Its C source and Bash tests are not
+part of the Project 2 CMake targets. Its original documentation is preserved in
+[the Project 1 README](docs/project1-readme.md), including historical setup and
+submission instructions that should not be used for Project 2.
 
-### Layout and ownership
+## Build
 
-| Path | Responsibility |
-| --- | --- |
-| `CMakeLists.txt` | Provided C++17 build with warnings, AddressSanitizer, and UndefinedBehaviorSanitizer. Change only if adding our own source files. |
-| `include/model/`, `include/harness/` | Provided interfaces; leave unchanged. |
-| `src/model_client.cpp`, `src/scripted_client.cpp`, `src/replay_client.cpp` | Provided model implementations; leave unchanged. |
-| `src/harness.cpp`, `src/main.cpp` | Provided execution loop and CLI; leave unchanged. |
-| `scripts/greeting.script` | Provided example conversation. |
-| `include/core/message.h` | Implemented in Part 2: roles, constructors, and const accessors. |
-| `tests/p2/test_message.cpp` | Standalone Message checks, independent of the unfinished core classes. |
-| `include/core/conversation.h`, `src/conversation.cpp` | Implemented in Part 3: growable array and Rule of Five. |
-| `tests/p2/test_conversation.cpp` | Standalone bounds, growth, ordering, copy, move, and ownership checks. |
-| `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | Implemented in Part 4: bounded streaming sentinel detection. |
-| `tests/p2/test_sentinel_scanner.cpp` | Standalone split-boundary, flush, and bounded-memory stress checks. |
-| `tests/p2/test_p2.cpp` | Main runner: all component checks plus eight harness integration groups. |
-| `tests/p2/test_*.h` | Shared component checks used by the main runner and standalone wrappers. |
-| `tests/p2/test_cli.sh` | Three checks of actual CLI shutdown and transcript saving. |
-| `docs/design-log-p2.md` | Provided outline; we will write the required 500-800-word design log. |
-
-The core files omitted from the starter ZIP are implemented. The CMake target
-`test_p2` now runs 26 test groups: one Message group, eight Conversation groups,
-nine SentinelScanner groups, and eight harness integration groups. Assertions
-remain enabled in test code even for Release builds. The component `.cpp`
-files are small standalone runners; their checks are shared through test headers
-so the provided CMake configuration does not need changes.
-
-### Checking Part 2 independently
-
-The small Message class is defined in its header, so no extra source file or
-change to the provided CMake configuration is needed. From Linux/Ubuntu WSL:
+Use Linux or Ubuntu WSL with GCC's C++ compiler, CMake 3.16 or newer, Make, and
+Bash. On a new Ubuntu installation:
 
 ```bash
-mkdir -p build
-g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
-  -fsanitize=address,undefined -Iinclude tests/p2/test_message.cpp -o build/test_message
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_message
+sudo apt-get update
+sudo apt-get install g++ cmake make
 ```
 
-These checks cover default construction (including array slots), all roles,
-empty and multiline content, independent string ownership, and accessor
-signatures. The same checks also run as part of the full assignment test suite.
+Run all following commands from the repository root. In this Windows workspace,
+the WSL path is `/mnt/c/Users/aarij/OneDrive/Documents/ece309_harness`.
 
-### Checking Part 3 independently
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-Werror
+cmake --build build -j2
+```
+
+The provided CMake configuration enables C++17, `-Wall -Wextra -Wpedantic`,
+AddressSanitizer, and UndefinedBehaviorSanitizer. The command above additionally
+treats warnings as errors. It produces `build/miniharness` and `build/test_p2`.
+
+## Run
+
+```bash
+./build/miniharness --script scripts/greeting.script --save transcript.txt
+```
+
+Enter any three nonempty lines to consume the example's three replies. The last
+reply is `Goodbye!`, followed by a stop message reporting three turns. Replies
+come from the script in order; they do not depend on the words you type.
+
+| Option | Behavior |
+| --- | --- |
+| `--script PATH` | Read scripted model replies from a file. Always supply this: the default `default.script` is not included. |
+| `--max-turns N` | Stop after N completed user/assistant turns; default 20. Use a nonnegative integer. |
+| `--save PATH` | Save the conversation when the loop finishes. Use an existing, writable parent directory. |
+
+Ctrl+D on an empty terminal line ends input gracefully and still saves the
+transcript when requested. Empty lines are skipped. Project 1 commands such as
+`exit`, `history`, and `calc` are ordinary input in Project 2.
+
+The supplied CLI has basic argument handling: use the documented options with
+valid values. Its input adapter treats EOF as shutdown, so finish redirected
+input lines with newlines. Its transcript writer does not report a failed file
+open; verify the output file exists. These provided implementations are unchanged.
+
+## Scripts, streaming, and transcripts
+
+A script contains message blocks separated by a line containing exactly `---`.
+A leading System block supplies the initial system message. Assistant blocks
+are consumed in order. Put any `chunk: N` directive before the block's role:
+
+```text
+role: system
+Be concise.
+---
+chunk: 2
+role: assistant
+Goodbye.<|end_conversation|>
+```
+
+The stop sentinel may span chunks. Text before it is displayed; the sentinel
+and subsequent text are hidden. The saved Assistant message includes the
+sentinel so replay stops at the same point. Text after the sentinel is discarded
+from both terminal output and stored history. A bare `---` line cannot appear
+inside message content. Running out of scripted replies yields ClientError.
+
+ReplayModelClient reads saved Assistant messages and the initial System message.
+The supplied CLI selects ScriptedModelClient only; replay is exercised through
+the C++ tests, not through a `--replay` option. The optional `match:` directives
+are ignored by the supplied scripted client.
+
+## Implementation and layout
+
+| Files | Ownership / purpose |
+| --- | --- |
+| `include/core/message.h` | Our Message class: role, owned text, constructors, const accessors. |
+| `include/core/conversation.h`, `src/conversation.cpp` | Our growable array, bounds checking, iteration, and Rule of Five. |
+| `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | Our bounded streaming scanner. |
+| `include/model/`, `src/model_client.cpp`, `src/scripted_client.cpp`, `src/replay_client.cpp` | Provided model interfaces and implementations, unchanged. |
+| `include/harness/harness.h`, `src/harness.cpp`, `src/main.cpp` | Provided execution loop and terminal CLI, unchanged. |
+| `CMakeLists.txt`, `scripts/greeting.script` | Provided build configuration and example, unchanged. |
+| `tests/p2/test_p2.cpp` | Main component/integration test runner. |
+| `tests/p2/test_message.h`, `test_conversation.h`, `test_sentinel_scanner.h` | Shared component test functions in `tests/p2/`. |
+| `tests/p2/test_message.cpp`, `test_conversation.cpp`, `test_sentinel_scanner.cpp` | Standalone component runners in `tests/p2/`. |
+| `tests/p2/test_cli.sh` | Actual CLI output and transcript checks. |
+| `docs/design-log-p2.md` | Design decisions, growth and buffer proofs, validation, and hindsight. |
+| `docs/p2-starter-README.md` | Original starter instructions, preserved for reference. |
+| `github.txt` | Existing repository URL. |
+
+Conversation starts without allocating, then grows through capacities 1, 2, 4,
+8, and so on. It keeps every message; the Project 1 five-turn limit does not
+apply. A System message is allowed only first; later ones throw
+`std::invalid_argument`. Invalid `at()` indices throw `std::out_of_range`.
+Copies own independent storage; moves leave the source empty and reusable.
+Growth invalidates pointers into the old array. Raw array allocation/deallocation
+is confined to Conversation, which does not use `std::vector`.
+
+SentinelScanner retains at most `sentinel.size() - 1` trailing bytes. Its first
+match stops output permanently. Without a match, `flush()` releases the withheld
+suffix, including partial sentinel text. Repeated flushing emits nothing more.
+Empty sentinels throw `std::invalid_argument`. Temporary processing/output memory
+depends on the current chunk size, while retained state depends only on sentinel
+length. Private friend helpers let tests inspect capacity and pending length
+without adding methods to the required public interfaces.
+
+See the [design log](docs/design-log-p2.md) for the proofs and ownership reasoning.
+
+## Tests and memory checks
+
+After building:
+
+```bash
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_p2
+bash tests/p2/test_cli.sh
+```
+
+The C++ runner executes **26 assert-based groups**: one Message, eight
+Conversation, nine SentinelScanner, and eight harness integration groups.
+Assertions remain active in Release builds. The **three CLI checks** compare
+complete output and saved transcripts on sentinel, EOF, and turn-limit shutdown.
+The provided CMake file does not register CTest tests; run these commands directly.
+
+Coverage includes empty bounds, pinned System messages, deep copies, pointer-
+stealing moves, self-assignment, doubled capacities, every sentinel split point,
+false matches, and 4 MiB fed one byte at a time with the pending bound checked
+after every byte. Integration checks cover zero/two/default-20 turn limits,
+blank input, both clients' exhaustion, and saved-conversation replay ending at
+EOF or a sentinel. Round trips compare all roles, content, output, and stop
+reasons. Temporary fixtures are cleaned up after successful runs.
+
+To check Release separately:
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Werror
+cmake --build build-release -j2
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build-release/test_p2
+bash tests/p2/test_cli.sh ./build-release/miniharness
+```
+
+**Verified results from Part 5:** Ubuntu WSL, GCC 15.2.0, Debug and Release builds;
+26/26 C++ groups and 3/3 CLI checks passed in each build. No compiler warnings,
+AddressSanitizer errors, UndefinedBehaviorSanitizer errors, or leaks were reported.
+Allocation-failure cleanup was reviewed but not tested by injecting allocation
+failures. These results cover the exercised inputs, not every possible input.
+
+The component runners can also be built independently, for example:
 
 ```bash
 mkdir -p build
@@ -65,414 +170,20 @@ g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_conversation
 ```
 
-Conversation starts without an allocation and grows through capacities 1, 2,
-4, 8, and so on. It keeps all messages; Project 1's five-turn limit does not
-apply to Project 2. `at()` throws `std::out_of_range` for invalid indices.
-A System message is accepted only as the first message; later System messages
-throw `std::invalid_argument`. Nothing is evicted. Copying owns independent
-storage, and moving leaves the source empty and reusable. Self-assignment is safe.
-Growth invalidates pointers into the old array. A private friend grants the
-tests access to capacity without changing the required public interface.
+## Submission preparation
 
-The eight test groups check these contracts, including growth through 4,097
-messages, retained role/content order, copying long strings, moves into populated
-objects, empty sources, and appending an existing element during reallocation.
-The supplied CMake configuration already lists the Conversation source file.
+The repository URL is already recorded in `github.txt`. Part 7 will perform the
+final audit and generate `github.zip`. Any existing ZIP from Project 1 is not a
+current Project 2 submission. Build directories, binaries, the example transcript,
+and the ZIP are excluded from Git.
 
-### Checking Part 4 independently
+After the final changes have been committed and pushed, generate the backup
+from the final commit:
 
 ```bash
-mkdir -p build
-g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
-  -fsanitize=address,undefined -Iinclude src/sentinel_scanner.cpp \
-  tests/p2/test_sentinel_scanner.cpp -o build/test_sentinel_scanner
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_sentinel_scanner
-```
-
-SentinelScanner retains at most `sentinel.size() - 1` trailing bytes between
-chunks. `feed()` returns safe output and whether the sentinel has been found.
-The sentinel itself and all subsequent text are discarded. After detection,
-later feeds and flushes return empty text with `sentinel_found == true`.
-Without a match, `flush()` releases the remaining text, including an incomplete
-sentinel. A repeated flush returns no additional text. Empty sentinels throw
-`std::invalid_argument`; one-character and overlapping sentinels are supported.
-
-The nine test groups cover clean text, empty chunks, full sentinels, every
-two-chunk split, character-by-character input, false matches, partial endings,
-custom sentinels, embedded null bytes, and 4 MiB of repeated false prefixes.
-The stress test checks the private pending-buffer size after every byte and
-verifies all output. It also checks the same input as one large chunk.
-Retained state is bounded by sentinel length; temporary processing/output
-storage depends on the current chunk size, not the entire stream.
-
-Part 4 validation passed: all nine scanner groups (with warnings treated as
-errors), the existing Message and Conversation checks, and both CMake targets.
-Sanitizers and leak detection reported no errors in the exercised runs. The
-greeting smoke test stopped after three turns and saved the sentinel in the
-transcript without displaying it. Ubuntu WSL needed CMake installed for the
-full build; the provided CMake file was not changed.
-
-### Development parts
-
-Each part gets its own commit: (1) workspace setup, (2) Message, (3) Conversation
-and its tests, (4) SentinelScanner and its tests, (5) harness integration tests,
-(6) final documentation, and (7) final validation and submission preparation.
-Keep design notes as implementation proceeds, then finalize the design log.
-
-### Full Part 5 validation
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-Werror
-cmake --build build -j2
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_p2
-bash tests/p2/test_cli.sh
-```
-
-The integration groups check zero/two/default-20 turn limits, a pinned system
-message, sentinel shutdown across chunk sizes (including text after the sentinel),
-EOF, blank input, exhaustion of both provided clients, and transcript round trips
-ending at either EOF or the sentinel. Round trips compare every role and message,
-terminal output, and stop reason after saving and loading through ReplayModelClient.
-The C++ suite uses temporary files and a test-only transcript writer. The separate
-Bash suite checks the real CLI's writer byte-for-byte on sentinel, EOF, and turn
-limit exits. This also verifies that terminal output omits the sentinel while
-the saved transcript retains it. Temporary fixtures are kept outside the repo
-and cleaned up after successful runs.
-
-The CLI script accepts an optional executable path, for example
-`bash tests/p2/test_cli.sh ./build-release/miniharness`. All provided production
-files, including `main.cpp` and `CMakeLists.txt`, remain unchanged. Parts 6 and 7
-will finalize the documentation and submission.
-
-Verified in Ubuntu WSL with GCC 15.2.0: both Debug and Release builds passed
-all 26 C++ groups and all three CLI checks. Warnings were treated as errors;
-AddressSanitizer, UndefinedBehaviorSanitizer, and leak detection reported no
-errors in these runs.
-
-### Build and run the complete program
-
-Run these commands from the repository root in Linux or Ubuntu WSL:
-
-```bash
-cmake -S . -B build
-cmake --build build
-./build/test_p2
-./build/miniharness --script scripts/greeting.script --save transcript.txt
-```
-
-The starter does not register CTest tests; run `test_p2` directly. Build
-directories and the example generated transcript are ignored by Git. Project 1
-still builds with `gcc harness.c -o harness` and uses `bash test.sh`.
-
-## Project 1 reference
-
-# ECE 309 Project 1: Mini LLM Harness in C
-
-A small terminal program that demonstrates what an LLM agent harness does:
-read input, manage limited conversation context, call a model or a tool, and
-display a response. The model is deliberately mocked, so no API key, network
-connection, external library, or actual LLM is needed.
-
-The implementation follows `Proj1_spec.pdf`. The assignment allows AI-assisted
-development; the original prompt, architecture, actual iterations, and generated
-AI responses are recorded in `vibe_coding_log.md`.
-
-## Features
-
-- A terminal loop using `fgets`, with `exit` and end-of-file shutdown.
-- A deterministic greeting/echo mock model.
-- Five complete user/response pairs of context, stored safely in fixed arrays.
-- `history` to inspect context and `recall` to demonstrate the model using it.
-- A calculator tool supporting addition, subtraction, multiplication, and division.
-- Checks for invalid arithmetic, oversized input, and input stream errors.
-- A separate AI-generated Bash test suite with a sanitizer mode.
-- A single commented C source file using only standard C library functionality.
-
-## File structure
-
-| File | Purpose |
-| --- | --- |
-| `harness.c` | Complete program: terminal loop, history, mock model, calculator. |
-| `test.sh` | 38 automated behavioral tests; optional memory checking. |
-| `README.md` | Build, usage, architecture, validation, and submission instructions. |
-| `vibe_coding_log.md` | Specification, exact user prompt, AI responses, and real development record. |
-| `github.txt` | Placeholder to replace with the actual published repository URL. |
-| `Proj1_spec.pdf` | Original five-page assignment specification, preserved unchanged. |
-| `.gitignore` | Excludes generated binaries, temporary files, and the submission ZIP. |
-| `.gitattributes` | Keeps source, scripts, and documentation in LF format across platforms. |
-| `github.zip` | Generated backup of the project files for submission; regenerate after publishing. |
-
-Builds produce `harness` and, in memory mode, `harness_asan`. These executables
-are intentionally excluded from Git and the ZIP. There are no project-specific
-headers because all program functions fit in one source file. The archive
-contains the source repository files, including the assignment PDF and hidden
-configuration files, without `.git` internals or generated artifacts.
-
-## Environment and compilation
-
-Use Linux/Ubuntu WSL with GCC and Bash. The C program itself uses standard C11;
-the test script uses Bash. No package is needed by the program beyond the normal
-C compiler/runtime. On Windows, run the commands inside **Ubuntu WSL**, not
-PowerShell. This workspace is available there at:
-
-```bash
-cd /mnt/c/Users/aarij/OneDrive/Documents/ece309_harness
-```
-
-The assignment's suggested editor is VS Code with Microsoft's C/C++ extension.
-Open this folder in VS Code and use a WSL terminal for compilation. If setting
-up a new Ubuntu environment, install GCC with `sudo apt install gcc` after
-updating the package index. The existing environment already had GCC installed.
-
-Compile with warnings:
-
-```bash
-gcc -std=c11 -Wall -Wextra -Wpedantic harness.c -o harness
-```
-
-The exact simpler command from the PDF also works:
-
-```bash
-gcc harness.c -o harness
-```
-
-No `-lm`, other library flags, or separate build system is required. GCC's
-standard `isfinite` macro is used to validate calculator values.
-
-## Running and commands
-
-```bash
-./harness
-```
-
-| Input | Behavior | Adds a turn? |
-| --- | --- | --- |
-| `hello` or `please say hello!` | Fixed greeting from the mock model. | Yes |
-| Any other ordinary text | Mock model echoes it as `You said: ...`. | Yes |
-| `calc 12 * 3` | Execute the calculator and return `Calculator result: 36`. | Yes |
-| `history` | Print retained user/response pairs, oldest first. | No |
-| `recall` | Mock model reports the previous user input, or empty context. | Yes |
-| `help` | Print command instructions. | No |
-| `exit` | Print `Bye!` and return success. | No |
-| End-of-file (Ctrl+D on an empty Linux terminal line) | End successfully. | No |
-| Empty or whitespace-only line | Ignore the line. | No |
-
-Commands are lowercase and case-sensitive. `exit`, `history`, `recall`, and
-`help` must match the whole line, without surrounding spaces. For example,
-`exit now` is ordinary text. The greeting recognizes lowercase `hello` with
-nonalphabetic boundaries: `hello!` matches, but `shelloworld` and `HELLO` do not.
-This is a simple deterministic rule, not natural-language understanding.
-
-Input is terminal text, limited to **255 bytes** per line, excluding its line
-ending. LF and CRLF are supported, as is a final line without a newline.
-Longer lines are rejected and drained completely; they cannot be split into
-multiple commands or partially stored. The program expects text, not binary
-input containing embedded null bytes. An input stream error prints a diagnostic
-and returns failure.
-
-Example session:
-
-```text
-ECE 309 Mini Harness
-Type help for commands. Type exit to quit.
-You> hello
-Assistant: Hello! I am a mock model.
-You> calc 12 * 3
-Assistant: Calculator result: 36
-You> recall
-Assistant: Previous input: calc 12 * 3
-You> history
-History (3/5 turns):
-1. User: hello
-   Assistant: Hello! I am a mock model.
-2. User: calc 12 * 3
-   Assistant: Calculator result: 36
-3. User: recall
-   Assistant: Previous input: calc 12 * 3
-You> exit
-Bye!
-```
-
-## Architecture and context management
-
-```text
-initialize empty history -> print banner -> prompt and fgets
-                                              |
-                      +-----------------------+--------------------+
-                      |                       |                    |
-                exit / EOF             local commands      model or calc tool
-                      |               help / history               |
-                 return success           |                 print response
-                                          |                 save complete pair
-                                          +---- next prompt -------+
-```
-
-`main` owns the input buffer, response buffer, and `Turn history[5]`. Each
-`Turn` has a 256-byte user buffer and a 512-byte response buffer. `count`
-tracks how many entries are valid, from zero through five. This is a fixed
-3,840-byte allocation for the history on the tested platform. It does not grow
-with the conversation.
-
-`save_turn` appends a pair. If all five slots are occupied, it shifts entries
-2-5 into slots 1-4, clears the reused last slot, and saves the new pair there.
-The oldest user input **and its corresponding response** are dropped together.
-Numbers displayed by `history` are positions in the retained window, not
-lifetime turn IDs. History lasts for one process and starts empty on every run.
-
-The mock model receives the existing history **before** its current response
-is stored. Thus `recall` can read the previous input. Calculator results and
-calculator error responses are also saved as complete turns; local control
-commands and invalid/blank input do not consume history slots.
-
-Demonstrate eviction:
-
-```bash
-printf 'one\ntwo\nthree\nfour\nfive\nsix\nhistory\nexit\n' | ./harness
-```
-
-The final history contains exactly `two`, `three`, `four`, `five`, and `six`,
-with their five matching responses. `one` is gone.
-
-All application storage has automatic lifetime, so no `malloc`/`free` is needed.
-Bounded `fgets`/`snprintf` calls protect the buffers; the response capacity is
-large enough for every input plus its fixed response prefix. Array shifts copy
-entire structures. These choices keep ownership and cleanup easy to explain.
-
-## Calculator tool
-
-The harness recognizes `calc` followed by whitespace or end-of-line and calls
-`calculator` instead of asking the mock model to invent a numerical answer.
-This is a local C function call, demonstrating delegated tool execution.
-
-Use one binary expression at a time:
-
-```text
-calc 2 + 3
-calc 2 - 5
-calc -2 * 3.5
-calc 7 / 2
-```
-
-The outputs are `5`, `-3`, `-7`, and `3.5`. Spaces around the operator are
-recommended for readability; `calc 2+3` also works. Signed numbers, decimals,
-and scientific notation are accepted through the standard `strtod` function.
-When typing into the running program, `*` needs no shell escaping.
-
-The parser reads the first number, a supported operator, and the second number,
-then verifies that only whitespace remains. It checks conversion errors and
-rejects nonfinite operands, unsupported operators, extra tokens, division by
-positive or negative zero, and nonfinite arithmetic results. Error text is
-returned normally, so the session can continue.
-
-Calculations use `double` and print up to 10 significant digits. Floating-point
-rounding applies; this is not an exact symbolic or arbitrary-precision calculator.
-Very small arithmetic results can round to zero. Parentheses, chained
-expressions, and operator precedence are deliberately outside this tool's scope.
-
-## Automated tests
-
-```bash
-bash test.sh
-bash test.sh --memory
-```
-
-Both modes compile the source themselves and fail with a nonzero status on
-compiler errors, warnings, output mismatches, or runtime failures. Run with
-`bash`, so executable file permissions are not required. Each test pipes
-predefined input into a fresh program and compares the complete transcript
-after removing interactive prompt markers. It also checks the process status.
-
-The 38 cases cover startup, greeting rules, normal echo, format-string-like
-text, all calculator operators, calculator errors, exact command routing,
-exit/EOF, CRLF, blank input, help, empty history, context recall, stored
-user/response pairs, read-only history, exactly five turns, sixth-turn eviction,
-1,000-turn eviction stress, 255-byte input, 256-byte rejection, and draining
-10,000-byte lines without corrupting subsequent input or history.
-
-`--memory` uses the **same entire suite** with a sanitizer build. Sanitizer
-support is required for that mode: failures are not silently treated as passes.
-
-## Memory testing and verified results
-
-Validation was performed in Ubuntu WSL on this Windows workspace with
-**GCC 15.2.0**. The normal test build treats warnings as errors:
-
-```bash
-gcc -std=c11 -Wall -Wextra -Wpedantic -Werror harness.c -o harness
-```
-
-The memory mode uses:
-
-```bash
-gcc -std=c11 -Wall -Wextra -Wpedantic -Werror -g -O1 \
-  -fsanitize=address,undefined -fno-omit-frame-pointer harness.c -o harness_asan
-export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
-export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-```
-
-Observed results after correcting the warning documented in the log:
-
-- Ordinary tests: **38/38 passed**.
-- AddressSanitizer and UndefinedBehaviorSanitizer tests: **38/38 passed**.
-- Leak detection was enabled; no leaks, invalid memory accesses, or undefined
-  behavior were reported in the exercised cases.
-- GCC builds completed with no warnings or errors after the correction.
-- Valgrind was unavailable and was not used.
-
-Fixed arrays avoid application-owned heap leaks, while AddressSanitizer also
-checks the exercised stack/buffer accesses. Passing tests are evidence for these
-inputs, not a proof for every possible input. The log records the actual
-optimized-build warning and correction, without inventing debugging failures.
-
-## GitHub publishing and assignment submission
-
-The assignment requires **both `github.txt` and `github.zip`**, due
-**September 5, 2026** according to the PDF. Publishing and course upload remain
-manual: no repository URL has been invented. The supplied ZIP is a backup of
-the completed project but currently includes the placeholder `github.txt`.
-Regenerate it after setting the real URL.
-
-1. Review the source and log so you can explain the design. If following the
-   editor setup in the guide, ensure VS Code and Microsoft's C/C++ extension
-   are installed; editor installation was not verified during this session.
-2. On GitHub, create an **empty** repository named `ece309_harness`. Do not add
-   a GitHub-generated README, license, or `.gitignore` to that empty repository.
-   Copy its actual HTTPS repository URL from your browser.
-3. Run the following in Ubuntu WSL from this workspace. The local repository
-   has already been initialized on `main`; no commits or remote are required
-   to run the program. Git may request your GitHub credentials when pushing.
-
-```bash
-cd /mnt/c/Users/aarij/OneDrive/Documents/ece309_harness
-bash test.sh
-bash test.sh --memory
-gcc -std=c11 -Wall -Wextra -Wpedantic harness.c -o harness
-
-read -r -p 'Paste your actual GitHub repository HTTPS URL: ' REPO_URL
-printf '%s\n' "$REPO_URL" > github.txt
-git add .gitattributes .gitignore harness.c test.sh README.md vibe_coding_log.md github.txt Proj1_spec.pdf
-git commit -m "Complete ECE 309 Project 1 mini harness"
-git remote add origin "$REPO_URL"
-git push -u origin main
 git archive --format=zip --prefix=ece309_harness/ --output=github.zip HEAD
 ```
 
-If Git reports an unknown author identity, set your own name/email and retry
-the commit (do not use somebody else's identity):
-
-```bash
-read -r -p 'Your Git author name: ' AUTHOR_NAME
-read -r -p 'Your Git author email: ' AUTHOR_EMAIL
-git config user.name "$AUTHOR_NAME"
-git config user.email "$AUTHOR_EMAIL"
-```
-
-If using a newly extracted ZIP rather than this workspace, run `git init -b main`
-before the publishing commands. If you have already added `origin`, update it
-with `git remote set-url origin "$REPO_URL"` instead of adding it again.
-Only generate the final archive after a successful commit so it contains the
-latest URL, source, tests, README, and log.
-
-4. Open your GitHub URL and confirm the project files are visible and accessible
-   to the grader. Submit **`github.txt` and `github.zip`** through the course's
-   submission system. The PDF does not specify an upload command or portal URL.
+Submit `github.txt` and the regenerated `github.zip` through the course submission
+system. The archive includes all tracked project files, including Project 1,
+without generated files or `.git` internals. It contains committed changes only.

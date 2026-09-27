@@ -1,124 +1,87 @@
-# Design Log — Project 2
+# Project 2 Design Log
 
-(500–800 words total. See spec §5 for what each section must cover.)
+## Scope and structure
 
-## Part 2 working notes
-
-Message is implemented entirely in its header because its constructors and
-accessors are short. The default constructor creates an empty System message,
-allowing Conversation to allocate arrays of Message objects later. The other
-constructor accepts a string by value and moves it into the owned content
-member. Changing the caller's string therefore cannot change the stored text.
-The accessors are const and noexcept; content returns a const reference to avoid
-copying. Standard string ownership handles cleanup without raw allocation or
-custom copy/move operations in Message. Standalone checks allow this part to be
-validated before Conversation and SentinelScanner exist. These working notes
-will be incorporated into the final 500-800-word log in Part 6.
-
-Validation: the initial compile could not run because WSL lacked g++. After
-installing the Ubuntu g++ package, the standalone checks compiled with C++17,
-strict warnings treated as errors, and AddressSanitizer/UndefinedBehaviorSanitizer.
-The program printed `Message checks passed.` with leak detection enabled and
-no compiler or sanitizer diagnostics. No implementation corrections were needed.
-The complete CMake build awaits the remaining core classes.
+Project 2 adds Message, Conversation, and SentinelScanner to the supplied
+C++17 harness. The model clients, CLI, execution loop, and CMake configuration
+remain unchanged. Message owns a string and defaults to an empty System message,
+so Conversation can allocate arrays of default-constructed objects. Accessors
+return the role and a const reference to content. Implementation and testing
+were completed with AI assistance in separate commits for each project part.
 
 ## Growth factor and amortized cost
 
-Part 3 uses capacity 0 initially, then 1, 2, 4, 8, and so on. For n appends,
-let C be the final capacity. For n > 0, C < 2n (including C = n = 1).
-Growth relocates 1 + 2 + ... + C/2 = C - 1 < 2n messages in total.
-Default construction of allocated slots also totals 1 + 2 + ... + C < 4n;
-destruction of old arrays is another linear total. Together with n insertions,
-container work is O(n), hence amortized O(1) per append. String construction
-from caller text has its own length-dependent cost; this claim concerns the
-container's storage operations. A capacity check prevents doubling overflow.
+Conversation starts with a null pointer, zero size, and zero capacity. Its first
+append allocates one slot. Later full arrays double their capacity, giving
+1, 2, 4, 8, and so on. Doubling is simple to explain and avoids reallocating
+on every insertion. A capacity check prevents multiplication overflow.
 
+For n positive appends starting from empty, let C be the final capacity. Then
+n <= C < 2n. The arrays relocated during growth contain 1 + 2 + 4 + ... + C/2
+messages, totaling C - 1 < 2n. Default construction of new slots totals
+1 + 2 + ... + C = 2C - 1 < 4n, and destruction of old slots is also linear.
+Adding the n insertions therefore gives O(n) total container work, or amortized
+O(1) per append. Constructing a message from text has a separate cost depending
+on its length; the bound does not claim arbitrary strings are free to copy.
 
-## Rule of Five evidence
+Nothing is evicted. A System message is accepted only at position zero; a later
+System message throws invalid_argument. Invalid at() indices throw out_of_range.
+Growth invalidates pointers into the previous array.
 
-Part 3 owns one Message array. The destructor uses delete[]. Copy construction
-allocates independent storage and copies messages, releasing the new array
-if a string copy throws. Copy assignment builds a temporary before replacing
-the destination, so failed copying leaves it unchanged. Moves transfer the
-pointer, size, and capacity and reset the source to null/zero without copying
-elements. Assignment checks for self-assignment. Array growth allocates first,
-then uses Message's nonthrowing move assignment; allocation failure leaves the
-existing conversation intact. append takes its argument by value, which also
-protects an existing element passed as input during growth. Empty end() avoids
-arithmetic on a null pointer. Bounds errors throw std::out_of_range; late System
-messages throw std::invalid_argument so a System message remains first.
+## Rule of Five and exception safety
 
-Standalone tests inspect actual capacity through a private friend, confirm
-distinct array and long-string storage after copying, check pointer identity
-after moving, reuse moved-from objects, and exercise populated destinations
-and self-assignment. Allocation-failure paths are reviewed structurally rather
-than tested by artificially exhausting system memory.
+Conversation exclusively owns its Message array. The destructor releases it
+with delete[]. Copy construction allocates another array and copies each
+message, giving independent storage. If a string copy throws, the constructor
+catches the exception, deletes its new array, and rethrows. This matters because
+a failed constructor does not run that object's destructor.
 
-Part 3 validation: GCC initially rejected the deliberate self-move expression
-under -Werror=self-move. The test now passes both references to a small move
-assignment helper, exercising the same case without disabling diagnostics.
-All eight Conversation test groups and the existing Message checks then passed
-with C++17, strict warnings as errors, AddressSanitizer, UndefinedBehaviorSanitizer,
-and leak detection enabled. No memory errors were reported. The provided
-CMake file and harness/model implementations remain unchanged; full integration
-awaits SentinelScanner.
+Copy assignment first constructs a temporary copy. Only after that succeeds
+does move assignment replace the destination, leaving the original unchanged
+if copying fails. Move construction and assignment transfer the pointer, size,
+and capacity, then reset the source to null and zero. Move assignment releases
+the destination's old array. Both assignments handle self-assignment, and
+moved-from objects can be reused or destroyed.
 
+Growth allocates before changing the old array and then uses Message's
+nonthrowing move assignment. Passing append's argument by value protects a
+message taken from the same array during reallocation. Empty end() avoids
+pointer arithmetic on null. Tests check independent array and long-string
+storage, transferred pointer identity, source reset, reuse, self-assignment,
+and growth through 4,097 messages. Allocation-failure handling was reviewed
+in the code; artificial allocation failures were not injected.
 
-## Sentinel scanner: bounded pending_ proof
+## Sentinel buffer bound
 
-Part 4 follows the specified trailing-window algorithm. For a nonempty sentinel
-of length m, feed searches the previous pending text plus the current chunk.
-If no match exists, it emits everything except the last min(text.size(), m-1)
-bytes. Any future match crossing this boundary can use at most m-1 old bytes;
-a full m-byte match would already have been detected. Thus emitting the prefix
-cannot lose a future match. Initially pending is empty. Each unsuccessful feed
-assigns at most m-1 bytes, and a successful feed or flush clears it. Induction
-therefore gives pending.size() <= m-1 after every operation. The implementation
-never appends a whole chunk into pending itself.
+For a nonempty sentinel of length m, feed searches pending text plus the next
+chunk. Without a match, it emits all but the final min(text.size(), m-1) bytes.
+A future sentinel crossing the boundary can use at most m-1 previous bytes;
+a complete m-byte match would already have been detected. Thus the emitted
+prefix cannot be needed for a later match.
 
-The first match returns only its preceding text and permanently marks the
-scanner stopped. Later input is ignored, which also handles calls after a match
-at an earlier split point. Without a match, flush releases an incomplete suffix
-as ordinary text. Empty sentinels are rejected to avoid subtracting one from
-zero. Retained state is O(m), constant for the fixed assignment sentinel;
-temporary combined text and returned output require O(chunk size + m) storage.
-This distinction avoids claiming constant total memory for arbitrarily large
-chunks. For a fixed sentinel, processing does not repeatedly search an ever-
-growing reply. Tests check every split point, overlapping patterns, and the
-pending bound throughout 4 MiB delivered one byte at a time.
+Initially pending is empty. Each unsuccessful feed assigns at most m-1 bytes;
+a successful feed or flush clears it. Induction establishes pending.size()
+<= m-1 after every operation. Whole chunks are never appended into pending
+itself. Retained scanner state is O(m), constant for the assignment's fixed
+sentinel. Temporary combined text and returned output use O(chunk size + m)
+space; this is not a constant-space claim for arbitrarily large chunks.
 
-Part 4 validation: all nine scanner test groups passed with strict GCC warnings
-treated as errors, AddressSanitizer, UndefinedBehaviorSanitizer, and leak
-detection. No scanner code correction was needed. WSL lacked CMake, so CMake
-and its dependencies were installed. Both supplied CMake targets then built
-without diagnostics, and the existing Message and Conversation checks passed.
-The greeting script stopped after three turns, hid the sentinel from terminal
-output, and retained it in the saved transcript. This was a smoke check;
-test_p2 remains the provided empty test placeholder until Part 5.
+The first match emits only preceding text and stops the scanner. Later text
+is discarded. Without a match, flush releases the incomplete suffix. Empty
+sentinels are rejected. Tests cover every split boundary, one-byte chunks,
+false matches, overlapping patterns, and the pending bound over 4 MiB.
 
+## Validation and hindsight
 
-## Part 5 integration notes
+Debug and Release builds passed 26 C++ test groups and three CLI checks with
+warnings treated as errors, AddressSanitizer, UndefinedBehaviorSanitizer, and
+leak detection. Replay tests compare messages, roles, output, and stop reasons;
+CLI checks verify saved transcripts after sentinel, EOF, and turn-limit exits.
+No sanitizer errors were reported. GCC rejected the intentional self-move test;
+a helper now exercises it without disabling warnings.
 
-The main test_p2 runner now includes all component checks plus eight integration
-groups using the provided ScriptedModelClient, ReplayModelClient, and Harness.
-Component checks moved into shared test headers; their original standalone
-runners still work. This keeps the supplied CMake file unchanged. Assertions
-are explicitly enabled in test translation units even under Release builds.
-
-Integration tests cover zero/two/default-20 turn limits, system-message ordering,
-sentinel halt with chunk sizes from one byte upward, discarded post-sentinel
-text, EOF, blank lines, and exhaustion of both clients. Transcript round trips
-save a conversation to a temporary file and compare all roles, content, output,
-and stop reasons after replay, with both sentinel and EOF endings. The test
-writer is separate from main.cpp, so an additional Bash script checks the actual
-CLI's saved transcript and complete output on sentinel, EOF, and turn-limit
-shutdown. Test fixtures use temporary files rather than overwriting user data.
-
-Validation: Debug and Release CMake builds completed with -Werror and the
-provided warning/sanitizer flags. Each build passed all 26 C++ test groups and
-all three CLI checks with AddressSanitizer, UndefinedBehaviorSanitizer, and leak
-detection enabled. No compiler or runtime test failures occurred in Part 5,
-and no production source or provided CMake changes were needed. The design log
-is still working notes; Part 6 will condense it to the required 500-800 words.
-
-## What I would change differently
+In hindsight, shared test functions would have been useful from the beginning.
+Separate component runners enabled early checks, but integrating them later
+required moving their checks into headers. Keeping shared checks and thin
+runners from the start would reduce that reorganization while retaining useful
+independent builds. Earlier working notes remain available in Git history.
