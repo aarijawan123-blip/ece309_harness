@@ -7,9 +7,9 @@ the old submission/setup instructions there describe the earlier project.
 
 ## Project 2: The Conversation Loop
 
-**Current stage: Part 4, all three core classes implemented.** The starter files
+**Current stage: Part 5, component and integration tests assembled.** The starter files
 were imported from `ece309-project2-starter.zip`. Message, Conversation, and
-SentinelScanner have standalone checks. Integration tests are next. The starter README is at
+SentinelScanner are tested together with the provided harness. The starter README is at
 [`docs/p2-starter-README.md`](docs/p2-starter-README.md).
 
 ### Layout and ownership
@@ -27,13 +27,17 @@ SentinelScanner have standalone checks. Integration tests are next. The starter 
 | `tests/p2/test_conversation.cpp` | Standalone bounds, growth, ordering, copy, move, and ownership checks. |
 | `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | Implemented in Part 4: bounded streaming sentinel detection. |
 | `tests/p2/test_sentinel_scanner.cpp` | Standalone split-boundary, flush, and bounded-memory stress checks. |
-| `tests/p2/test_p2.cpp` | Provided placeholder; we will add unit and integration tests. |
+| `tests/p2/test_p2.cpp` | Main runner: all component checks plus eight harness integration groups. |
+| `tests/p2/test_*.h` | Shared component checks used by the main runner and standalone wrappers. |
+| `tests/p2/test_cli.sh` | Three checks of actual CLI shutdown and transcript saving. |
 | `docs/design-log-p2.md` | Provided outline; we will write the required 500-800-word design log. |
 
-The core files omitted from the starter ZIP are now implemented. The full
-CMake targets can be built, but `test_p2` is still the starter placeholder;
-running it does not validate the project. Run the standalone checks below.
-Part 5 will assemble the assignment's full test suite and integration checks.
+The core files omitted from the starter ZIP are implemented. The CMake target
+`test_p2` now runs 26 test groups: one Message group, eight Conversation groups,
+nine SentinelScanner groups, and eight harness integration groups. Assertions
+remain enabled in test code even for Release builds. The component `.cpp`
+files are small standalone runners; their checks are shared through test headers
+so the provided CMake configuration does not need changes.
 
 ### Checking Part 2 independently
 
@@ -49,8 +53,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./buil
 
 These checks cover default construction (including array slots), all roles,
 empty and multiline content, independent string ownership, and accessor
-signatures. They are separate from the full assignment test suite, which will
-be developed in the later parts.
+signatures. The same checks also run as part of the full assignment test suite.
 
 ### Checking Part 3 independently
 
@@ -115,6 +118,36 @@ Each part gets its own commit: (1) workspace setup, (2) Message, (3) Conversatio
 and its tests, (4) SentinelScanner and its tests, (5) harness integration tests,
 (6) final documentation, and (7) final validation and submission preparation.
 Keep design notes as implementation proceeds, then finalize the design log.
+
+### Full Part 5 validation
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-Werror
+cmake --build build -j2
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_p2
+bash tests/p2/test_cli.sh
+```
+
+The integration groups check zero/two/default-20 turn limits, a pinned system
+message, sentinel shutdown across chunk sizes (including text after the sentinel),
+EOF, blank input, exhaustion of both provided clients, and transcript round trips
+ending at either EOF or the sentinel. Round trips compare every role and message,
+terminal output, and stop reason after saving and loading through ReplayModelClient.
+The C++ suite uses temporary files and a test-only transcript writer. The separate
+Bash suite checks the real CLI's writer byte-for-byte on sentinel, EOF, and turn
+limit exits. This also verifies that terminal output omits the sentinel while
+the saved transcript retains it. Temporary fixtures are kept outside the repo
+and cleaned up after successful runs.
+
+The CLI script accepts an optional executable path, for example
+`bash tests/p2/test_cli.sh ./build-release/miniharness`. All provided production
+files, including `main.cpp` and `CMakeLists.txt`, remain unchanged. Parts 6 and 7
+will finalize the documentation and submission.
+
+Verified in Ubuntu WSL with GCC 15.2.0: both Debug and Release builds passed
+all 26 C++ groups and all three CLI checks. Warnings were treated as errors;
+AddressSanitizer, UndefinedBehaviorSanitizer, and leak detection reported no
+errors in these runs.
 
 ### Build and run the complete program
 

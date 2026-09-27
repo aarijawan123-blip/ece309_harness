@@ -97,4 +97,28 @@ output, and retained it in the saved transcript. This was a smoke check;
 test_p2 remains the provided empty test placeholder until Part 5.
 
 
+## Part 5 integration notes
+
+The main test_p2 runner now includes all component checks plus eight integration
+groups using the provided ScriptedModelClient, ReplayModelClient, and Harness.
+Component checks moved into shared test headers; their original standalone
+runners still work. This keeps the supplied CMake file unchanged. Assertions
+are explicitly enabled in test translation units even under Release builds.
+
+Integration tests cover zero/two/default-20 turn limits, system-message ordering,
+sentinel halt with chunk sizes from one byte upward, discarded post-sentinel
+text, EOF, blank lines, and exhaustion of both clients. Transcript round trips
+save a conversation to a temporary file and compare all roles, content, output,
+and stop reasons after replay, with both sentinel and EOF endings. The test
+writer is separate from main.cpp, so an additional Bash script checks the actual
+CLI's saved transcript and complete output on sentinel, EOF, and turn-limit
+shutdown. Test fixtures use temporary files rather than overwriting user data.
+
+Validation: Debug and Release CMake builds completed with -Werror and the
+provided warning/sanitizer flags. Each build passed all 26 C++ test groups and
+all three CLI checks with AddressSanitizer, UndefinedBehaviorSanitizer, and leak
+detection enabled. No compiler or runtime test failures occurred in Part 5,
+and no production source or provided CMake changes were needed. The design log
+is still working notes; Part 6 will condense it to the required 500-800 words.
+
 ## What I would change differently
