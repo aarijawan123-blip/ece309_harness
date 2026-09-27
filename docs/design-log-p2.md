@@ -66,6 +66,35 @@ awaits SentinelScanner.
 
 ## Sentinel scanner: bounded pending_ proof
 
+Part 4 follows the specified trailing-window algorithm. For a nonempty sentinel
+of length m, feed searches the previous pending text plus the current chunk.
+If no match exists, it emits everything except the last min(text.size(), m-1)
+bytes. Any future match crossing this boundary can use at most m-1 old bytes;
+a full m-byte match would already have been detected. Thus emitting the prefix
+cannot lose a future match. Initially pending is empty. Each unsuccessful feed
+assigns at most m-1 bytes, and a successful feed or flush clears it. Induction
+therefore gives pending.size() <= m-1 after every operation. The implementation
+never appends a whole chunk into pending itself.
+
+The first match returns only its preceding text and permanently marks the
+scanner stopped. Later input is ignored, which also handles calls after a match
+at an earlier split point. Without a match, flush releases an incomplete suffix
+as ordinary text. Empty sentinels are rejected to avoid subtracting one from
+zero. Retained state is O(m), constant for the fixed assignment sentinel;
+temporary combined text and returned output require O(chunk size + m) storage.
+This distinction avoids claiming constant total memory for arbitrarily large
+chunks. For a fixed sentinel, processing does not repeatedly search an ever-
+growing reply. Tests check every split point, overlapping patterns, and the
+pending bound throughout 4 MiB delivered one byte at a time.
+
+Part 4 validation: all nine scanner test groups passed with strict GCC warnings
+treated as errors, AddressSanitizer, UndefinedBehaviorSanitizer, and leak
+detection. No scanner code correction was needed. WSL lacked CMake, so CMake
+and its dependencies were installed. Both supplied CMake targets then built
+without diagnostics, and the existing Message and Conversation checks passed.
+The greeting script stopped after three turns, hid the sentinel from terminal
+output, and retained it in the saved transcript. This was a smoke check;
+test_p2 remains the provided empty test placeholder until Part 5.
 
 
 ## What I would change differently

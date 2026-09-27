@@ -7,9 +7,9 @@ the old submission/setup instructions there describe the earlier project.
 
 ## Project 2: The Conversation Loop
 
-**Current stage: Part 3, Message and Conversation implemented.** The starter files have
-been imported from `ece309-project2-starter.zip`. The Message class has standalone
-checks, as does Conversation; SentinelScanner is still pending. The starter README is at
+**Current stage: Part 4, all three core classes implemented.** The starter files
+were imported from `ece309-project2-starter.zip`. Message, Conversation, and
+SentinelScanner have standalone checks. Integration tests are next. The starter README is at
 [`docs/p2-starter-README.md`](docs/p2-starter-README.md).
 
 ### Layout and ownership
@@ -25,14 +25,15 @@ checks, as does Conversation; SentinelScanner is still pending. The starter READ
 | `tests/p2/test_message.cpp` | Standalone Message checks, independent of the unfinished core classes. |
 | `include/core/conversation.h`, `src/conversation.cpp` | Implemented in Part 3: growable array and Rule of Five. |
 | `tests/p2/test_conversation.cpp` | Standalone bounds, growth, ordering, copy, move, and ownership checks. |
-| `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | To be created in Part 4. |
+| `include/core/sentinel_scanner.h`, `src/sentinel_scanner.cpp` | Implemented in Part 4: bounded streaming sentinel detection. |
+| `tests/p2/test_sentinel_scanner.cpp` | Standalone split-boundary, flush, and bounded-memory stress checks. |
 | `tests/p2/test_p2.cpp` | Provided placeholder; we will add unit and integration tests. |
 | `docs/design-log-p2.md` | Provided outline; we will write the required 500-800-word design log. |
 
-The missing core files are intentional at this stage. Despite the starter test
-comment saying it builds out of the box, this ZIP omits the core headers and
-implementations. A full CMake build cannot succeed until those are implemented.
-No placeholder implementations have been added to hide that dependency.
+The core files omitted from the starter ZIP are now implemented. The full
+CMake targets can be built, but `test_p2` is still the starter placeholder;
+running it does not validate the project. Run the standalone checks below.
+Part 5 will assemble the assignment's full test suite and integration checks.
 
 ### Checking Part 2 independently
 
@@ -73,7 +74,40 @@ tests access to capacity without changing the required public interface.
 The eight test groups check these contracts, including growth through 4,097
 messages, retained role/content order, copying long strings, moves into populated
 objects, empty sources, and appending an existing element during reallocation.
-The full CMake build still requires SentinelScanner in Part 4.
+The supplied CMake configuration already lists the Conversation source file.
+
+### Checking Part 4 independently
+
+```bash
+mkdir -p build
+g++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -g \
+  -fsanitize=address,undefined -Iinclude src/sentinel_scanner.cpp \
+  tests/p2/test_sentinel_scanner.cpp -o build/test_sentinel_scanner
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./build/test_sentinel_scanner
+```
+
+SentinelScanner retains at most `sentinel.size() - 1` trailing bytes between
+chunks. `feed()` returns safe output and whether the sentinel has been found.
+The sentinel itself and all subsequent text are discarded. After detection,
+later feeds and flushes return empty text with `sentinel_found == true`.
+Without a match, `flush()` releases the remaining text, including an incomplete
+sentinel. A repeated flush returns no additional text. Empty sentinels throw
+`std::invalid_argument`; one-character and overlapping sentinels are supported.
+
+The nine test groups cover clean text, empty chunks, full sentinels, every
+two-chunk split, character-by-character input, false matches, partial endings,
+custom sentinels, embedded null bytes, and 4 MiB of repeated false prefixes.
+The stress test checks the private pending-buffer size after every byte and
+verifies all output. It also checks the same input as one large chunk.
+Retained state is bounded by sentinel length; temporary processing/output
+storage depends on the current chunk size, not the entire stream.
+
+Part 4 validation passed: all nine scanner groups (with warnings treated as
+errors), the existing Message and Conversation checks, and both CMake targets.
+Sanitizers and leak detection reported no errors in the exercised runs. The
+greeting smoke test stopped after three turns and saved the sentinel in the
+transcript without displaying it. Ubuntu WSL needed CMake installed for the
+full build; the provided CMake file was not changed.
 
 ### Development parts
 
@@ -82,7 +116,7 @@ and its tests, (4) SentinelScanner and its tests, (5) harness integration tests,
 (6) final documentation, and (7) final validation and submission preparation.
 Keep design notes as implementation proceeds, then finalize the design log.
 
-### Build and run once the core classes are implemented
+### Build and run the complete program
 
 Run these commands from the repository root in Linux or Ubuntu WSL:
 
