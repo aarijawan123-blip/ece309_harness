@@ -4,9 +4,10 @@ Project 2 is a C++17 conversation harness with a custom growable message array
 and streaming stop-sentinel detection. It uses deterministic scripted/replay
 clients, with no network connection or model API required.
 
-**Status:** Parts 1-6 are complete: setup, Message, Conversation, SentinelScanner,
-integration tests, and documentation. Part 7 is the final audit and submission
-packaging. Each part has its own commit.
+**Status:** All seven parts are complete, including the final audit and submission
+preparation. Each part has its own commit. See the
+[final verification record](docs/final-verification-p2.md) for the requirement
+checklist and final test results.
 
 Project 1 remains at the repository root. Its C source and Bash tests are not
 part of the Project 2 CMake targets. Its original documentation is preserved in
@@ -154,7 +155,7 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./buil
 bash tests/p2/test_cli.sh ./build-release/miniharness
 ```
 
-**Verified results from Part 5:** Ubuntu WSL, GCC 15.2.0, Debug and Release builds;
+**Final verified results (Part 7):** Ubuntu WSL, GCC 15.2.0, fresh Debug and Release builds;
 26/26 C++ groups and 3/3 CLI checks passed in each build. No compiler warnings,
 AddressSanitizer errors, UndefinedBehaviorSanitizer errors, or leaks were reported.
 Allocation-failure cleanup was reviewed but not tested by injecting allocation
@@ -172,13 +173,12 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ./buil
 
 ## Submission preparation
 
-The repository URL is already recorded in `github.txt`. Part 7 will perform the
-final audit and generate `github.zip`. Any existing ZIP from Project 1 is not a
-current Project 2 submission. Build directories, binaries, the example transcript,
-and the ZIP are excluded from Git.
+The public repository URL is recorded in `github.txt`. The local `github.zip`
+is generated from the final Project 2 commit, replacing the old Project 1 backup.
+Build directories, binaries, the example transcript, and the ZIP are excluded
+from Git. The ZIP is a separate Moodle submission file, not a GitHub-tracked file.
 
-After the final changes have been committed and pushed, generate the backup
-from the final commit:
+To regenerate the backup after any future committed changes:
 
 ```bash
 git archive --format=zip --prefix=ece309_harness/ --output=github.zip HEAD
