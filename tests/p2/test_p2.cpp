@@ -1,243 +1,221 @@
-// Keep assertions active in Release builds too.
-#ifdef NDEBUG
-#undef NDEBUG
-#endif
-#include "test_message.h"
-#include "test_conversation.h"
-#include "test_sentinel_scanner.h"
+// tests/p2/test_p2.cpp
+//
+// PROVIDED. P2 regression suite. It uses only the P2 public interface of
+// Conversation and SentinelScanner, plus the provided Harness with NO tools,
+// so it must pass unchanged on top of your P2 code (interface-freeze rule).
+// You may add your own P2 tests to this file.
+
+#include "../mini_test.h"
+
+#include "core/conversation.h"
+#include "core/sentinel_scanner.h"
 #include "harness/harness.h"
+#include "harness/transcript.h"
 #include "model/replay_client.h"
-#include "model/scripted_client.h"
 
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <unistd.h>
+#include <cstdio>
+#include <memory>
+#include <string>
+#include <vector>
 
-class TestFile {
+namespace {
+
+class LinesInput : public InputSource {
 public:
-    std::string path;
-    explicit TestFile(const std::string& text = "") {
-        path = (std::filesystem::temp_directory_path() / "ece309-p2-XXXXXX").string();
-        const int fd = mkstemp(path.data());
-        if (fd == -1) throw std::runtime_error("Cannot create test file");
-        close(fd);
-        std::ofstream file(path);
-        file << text;
-        file.close();
-        assert(file.good());
-    }
-    ~TestFile() {
-        std::error_code error;
-        std::filesystem::remove(path, error);
-    }
-    TestFile(const TestFile&) = delete;
-    TestFile& operator=(const TestFile&) = delete;
-};
-
-class TestInput : public InputSource {
-public:
-    explicit TestInput(const std::string& text) : input_(text) {}
+    explicit LinesInput(std::vector<std::string> lines) : lines_(std::move(lines)) {}
     std::string read_line() override {
-        ++reads;
-        std::string line;
-        eof_ = !static_cast<bool>(std::getline(input_, line));
-        return line;
+        if (i_ >= lines_.size()) { eof_ = true; return ""; }
+        return lines_[i_++];
     }
     bool is_eof() const override { return eof_; }
-    int reads = 0;
 private:
-    std::istringstream input_;
+    std::vector<std::string> lines_;
+    std::size_t i_ = 0;
     bool eof_ = false;
 };
 
-class TestOutput : public OutputSink {
+class StringOutput : public OutputSink {
 public:
-    void write(std::string_view text) override { content.append(text); }
-    std::string content;
+    std::string data;
+    void write(std::string_view t) override { data += t; }
 };
 
-static void turn_limit() {
-    TestFile script("role: assistant\none\n---\nrole: assistant\ntwo\n");
-    for (int limit : {0, 2}) {
-        HarnessConfig cfg;
-        cfg.max_turns = limit;
-        cfg.system_message = "system";
-        Harness harness(std::make_unique<ScriptedModelClient>(script.path), cfg);
-        TestInput input("first\nsecond\nunused\n");
-        TestOutput output;
-        assert(harness.run(input, output).kind == StopReason::Kind::TurnLimit);
-        assert(input.reads == limit);
-        const auto& conv = harness.conversation();
-        assert(conv.size() == static_cast<std::size_t>(1 + 2 * limit));
-        assert(conv.at(0).role() == Role::System);
-        assert(conv.at(0).content() == "system");
-        if (limit == 2) {
-            assert(output.content == "you> assistant> one\nyou> assistant> two\n");
-            assert(conv.at(1).role() == Role::User && conv.at(1).content() == "first");
-            assert(conv.at(2).role() == Role::Assistant && conv.at(2).content() == "one");
-            assert(conv.at(3).content() == "second");
-            assert(conv.at(4).content() == "two");
-        } else assert(output.content.empty());
+class FixedModel : public ModelClient {
+public:
+    using ModelClient::generate;
+    explicit FixedModel(std::string reply, std::size_t chunk = 0)
+        : reply_(std::move(reply)), chunk_(chunk) {}
+    void generate(const Conversation&, TokenSink& sink) override {
+        if (chunk_ == 0) sink.on_chunk(reply_);
+        else for (std::size_t i = 0; i < reply_.size(); i += chunk_) sink.on_chunk(reply_.substr(i, chunk_));
+        sink.on_complete();
+    }
+private:
+    std::string reply_;
+    std::size_t chunk_;
+};
+
+std::string scan_all(SentinelScanner& s, const std::vector<std::string>& chunks, bool* found) {
+    std::string out;
+    *found = false;
+    for (const auto& c : chunks) {
+        auto r = s.feed(c);
+        out += r.safe_text;
+        if (r.sentinel_found) { *found = true; return out; }
+    }
+    out += s.flush().safe_text;
+    return out;
+}
+
+const std::string kSent = "<|end_conversation|>";
+
+}  // namespace
+
+// ---------------------------------------------------------------- Conversation
+
+TEST(conv_empty) {
+    Conversation c;
+    CHECK(c.size() == 0);
+    CHECK(c.begin() == c.end());
+}
+
+TEST(conv_append_and_order) {
+    Conversation c;
+    c.append(Message(Role::System, "sys"));
+    for (int i = 0; i < 100; ++i) c.append(Message(Role::User, std::to_string(i)));
+    REQUIRE(c.size() == 101);
+    CHECK(c.at(0).role() == Role::System);
+    for (int i = 0; i < 100; ++i) CHECK(c.at(i + 1).content() == std::to_string(i));
+}
+
+TEST(conv_holds_tool_role) {   // P3: the new enum value must flow through
+    Conversation c;
+    c.append(Message(Role::Tool, "<|tool_result|>{}<|/tool_result|>"));
+    REQUIRE(c.size() == 1);
+    CHECK(c.at(0).role() == Role::Tool);
+}
+
+TEST(conv_range_for) {
+    Conversation c;
+    for (int i = 0; i < 10; ++i) c.append(Message(Role::User, std::to_string(i)));
+    int k = 0;
+    for (const Message& m : c) CHECK(m.content() == std::to_string(k++));
+    CHECK(k == 10);
+}
+
+TEST(conv_copy_is_deep) {
+    Conversation a;
+    for (int i = 0; i < 5; ++i) a.append(Message(Role::User, "m" + std::to_string(i)));
+    Conversation b = a;
+    REQUIRE(b.size() == a.size());
+    CHECK(a.begin() != b.begin());
+    b.append(Message(Role::User, "only in b"));
+    CHECK(a.size() == 5);
+    CHECK(b.size() == 6);
+    Conversation c;
+    c = a;
+    CHECK(c.begin() != a.begin());
+    CHECK(c.at(4).content() == "m4");
+    Conversation& alias = c;
+    c = alias;   // self-assignment must be harmless
+    CHECK(c.size() == 5);
+}
+
+TEST(conv_move_steals) {
+    Conversation a;
+    for (int i = 0; i < 5; ++i) a.append(Message(Role::User, "x"));
+    const Message* p = a.begin();
+    Conversation b = std::move(a);
+    CHECK(b.begin() == p);
+    CHECK(a.size() == 0);   // NOLINT(bugprone-use-after-move): spec requires valid+empty
+    Conversation c;
+    c.append(Message(Role::User, "old"));
+    c = std::move(b);
+    CHECK(c.begin() == p);
+    CHECK(c.size() == 5);
+    a.append(Message(Role::User, "moved-from is reusable"));
+    CHECK(a.size() == 1);
+}
+
+// ---------------------------------------------------------- SentinelScanner
+
+TEST(scan_clean_text) {
+    SentinelScanner s(kSent);
+    bool found = false;
+    CHECK(scan_all(s, {"Just ", "some text."}, &found) == "Just some text.");
+    CHECK(!found);
+}
+
+TEST(scan_every_split) {
+    const std::string text = "Goodbye." + kSent;
+    for (std::size_t split = 0; split <= text.size(); ++split) {
+        SentinelScanner s(kSent);
+        bool found = false;
+        std::string out = scan_all(s, {text.substr(0, split), text.substr(split)}, &found);
+        CHECK(found);
+        CHECK(out == "Goodbye.");
     }
 }
 
-static void default_turn_limit() {
-    std::string script_text, inputs, expected;
-    for (int i = 0; i < 21; ++i) {
-        script_text += "role: assistant\nreply\n---\n";
-        inputs += "hello\n";
-        if (i < 20) expected += "you> assistant> reply\n";
+TEST(scan_one_byte_at_a_time) {
+    const std::string text = "abc<|end_<|end_conv" + kSent + "ignored";
+    SentinelScanner s(kSent);
+    std::vector<std::string> chunks;
+    for (char ch : text) chunks.push_back(std::string(1, ch));
+    bool found = false;
+    CHECK(scan_all(s, chunks, &found) == "abc<|end_<|end_conv");
+    CHECK(found);
+}
+
+TEST(scan_false_alarm) {
+    SentinelScanner s(kSent);
+    bool found = false;
+    CHECK(scan_all(s, {"Here is <|end_", "world|> done"}, &found) == "Here is <|end_world|> done");
+    CHECK(!found);
+}
+
+// ------------------------------------------------- Harness (no tools = P2)
+
+TEST(harness_turn_limit) {
+    LinesInput in({"a", "b", "c", "d", "e"});
+    StringOutput out;
+    HarnessConfig cfg;
+    cfg.max_turns = 2;
+    Harness h(std::make_unique<FixedModel>("reply"), cfg);
+    CHECK(h.run(in, out).kind == StopReason::Kind::TurnLimit);
+    CHECK(h.conversation().size() == 4);
+}
+
+TEST(harness_eof) {
+    LinesInput in({});
+    StringOutput out;
+    Harness h(std::make_unique<FixedModel>("reply"), HarnessConfig{});
+    CHECK(h.run(in, out).kind == StopReason::Kind::UserExit);
+}
+
+TEST(harness_sentinel_halts_and_is_hidden) {
+    LinesInput in({"hi", "again"});
+    StringOutput out;
+    Harness h(std::make_unique<FixedModel>("Bye now." + kSent, 3), HarnessConfig{});
+    CHECK(h.run(in, out).kind == StopReason::Kind::Sentinel);
+    CHECK(out.data.find("<|end_") == std::string::npos);
+    CHECK(out.data.find("Bye now.") != std::string::npos);
+}
+
+TEST(harness_transcript_round_trip) {
+    const std::string path = "p2_round_trip.txt";
+    {
+        LinesInput in({"one", "two"});
+        StringOutput out;
+        Harness h(std::make_unique<FixedModel>("same reply"), HarnessConfig{});
+        h.run(in, out);
+        REQUIRE(save_transcript(h.conversation(), path));
     }
-    TestFile script(script_text);
-    Harness harness(std::make_unique<ScriptedModelClient>(script.path), {});
-    TestInput input(inputs);
-    TestOutput output;
-    assert(harness.run(input, output).kind == StopReason::Kind::TurnLimit);
-    assert(input.reads == 20);
-    assert(harness.conversation().size() == 40);
-    assert(output.content == expected);
+    ReplayModelClient replay(path);
+    Conversation empty;
+    CHECK(replay.generate(empty).content() == "same reply");
+    CHECK(replay.generate(empty).content() == "same reply");
+    std::remove(path.c_str());
 }
 
-static void sentinel_halt() {
-    for (std::size_t chunk = 1; chunk <= sentinel.size() + 10; ++chunk) {
-        TestFile script("chunk: " + std::to_string(chunk) +
-                        "\nrole: assistant\nGoodbye." + sentinel + "discard\n");
-        HarnessConfig cfg;
-        cfg.max_turns = 1; // The sentinel takes precedence on the last turn.
-        Harness harness(std::make_unique<ScriptedModelClient>(script.path), cfg);
-        TestInput input("bye\nunused\n");
-        TestOutput output;
-        auto reason = harness.run(input, output);
-        assert(reason.kind == StopReason::Kind::Sentinel);
-        assert(reason.detail == "stop sentinel after 1 turns");
-        assert(input.reads == 1);
-        assert(output.content == "you> assistant> Goodbye.\n");
-        assert(harness.conversation().size() == 2);
-        assert(harness.conversation().at(1).content() == "Goodbye." + sentinel);
-    }
-}
-
-static void eof_shutdown() {
-    TestFile script("chunk: 1\nrole: assistant\npartial <|end_\n");
-    for (const std::string text : {"", "hello\n"}) {
-        Harness harness(std::make_unique<ScriptedModelClient>(script.path), {});
-        TestInput input(text);
-        TestOutput output;
-        assert(harness.run(input, output).kind == StopReason::Kind::UserExit);
-        if (text.empty()) {
-            assert(harness.conversation().size() == 0);
-            assert(output.content == "you> ");
-        } else {
-            assert(harness.conversation().size() == 2);
-            assert(harness.conversation().at(1).content() == "partial <|end_");
-            assert(output.content == "you> assistant> partial <|end_\nyou> ");
-        }
-    }
-}
-
-static void blank_input() {
-    TestFile script("role: assistant\nbye" + sentinel + "\n");
-    Harness harness(std::make_unique<ScriptedModelClient>(script.path), {});
-    TestInput input("\n\nhello\n");
-    TestOutput output;
-    assert(harness.run(input, output).kind == StopReason::Kind::Sentinel);
-    assert(input.reads == 3);
-    assert(harness.conversation().size() == 2);
-    assert(harness.conversation().at(0).content() == "hello");
-    assert(output.content == "you> you> you> assistant> bye\n");
-}
-
-static void script_exhaustion() {
-    TestFile script("role: assistant\none\n");
-    Harness harness(std::make_unique<ScriptedModelClient>(script.path), {});
-    TestInput input("hello\nmore\n");
-    TestOutput output;
-    const auto reason = harness.run(input, output);
-    assert(reason.kind == StopReason::Kind::ClientError);
-    assert(reason.detail.find("script exhausted") != std::string::npos);
-    assert(harness.conversation().size() == 3);
-    assert(harness.conversation().at(2).role() == Role::User);
-    assert(output.content == "you> assistant> one\nyou> assistant> \n");
-}
-
-static void replay_exhaustion() {
-    TestFile transcript("role: user\nhello\n---\nrole: assistant\none\n");
-    Harness harness(std::make_unique<ReplayModelClient>(transcript.path), {});
-    TestInput input("hello\nmore\n");
-    TestOutput output;
-    const auto reason = harness.run(input, output);
-    assert(reason.kind == StopReason::Kind::ClientError);
-    assert(reason.detail.find("transcript exhausted") != std::string::npos);
-    assert(harness.conversation().size() == 3);
-    assert(output.content == "you> assistant> one\nyou> assistant> \n");
-}
-
-static void save_conversation(const Conversation& conv, const std::string& path) {
-    std::ofstream file(path);
-    assert(file.is_open());
-    for (std::size_t i = 0; i < conv.size(); ++i) {
-        if (i != 0) file << "---\n";
-        const auto& message = conv.at(i);
-        const char* role = message.role() == Role::System ? "system" :
-                           message.role() == Role::User ? "user" : "assistant";
-        file << "role: " << role << '\n' << message.content() << '\n';
-    }
-    file.close();
-    assert(file.good());
-}
-
-static void transcript_round_trip() {
-    for (bool use_sentinel : {false, true}) {
-        const std::string ending = use_sentinel ? sentinel : "";
-        TestFile script("role: system\nBe concise.\n---\nchunk: 2\n"
-                        "role: assistant\nFirst line\nSecond line\n---\n"
-                        "chunk: 1\nrole: assistant\nGoodbye." + ending + "\n");
-        auto client = std::make_unique<ScriptedModelClient>(script.path);
-        HarnessConfig cfg;
-        cfg.system_message = client->system_message();
-        Harness original(std::move(client), cfg);
-        TestInput input("hello\nbye\n");
-        TestOutput output;
-        const auto reason = original.run(input, output);
-        assert(reason.kind == (use_sentinel ? StopReason::Kind::Sentinel :
-                                             StopReason::Kind::UserExit));
-        assert(original.conversation().size() == 5);
-        assert(original.conversation().at(0).content() == "Be concise.");
-        TestFile transcript;
-        save_conversation(original.conversation(), transcript.path);
-        auto replay_client = std::make_unique<ReplayModelClient>(transcript.path);
-        cfg.system_message = replay_client->system_message();
-        Harness replay(std::move(replay_client), cfg);
-        TestInput replay_input("hello\nbye\n");
-        TestOutput replay_output;
-        const auto replay_reason = replay.run(replay_input, replay_output);
-        assert(replay_reason.kind == reason.kind);
-        assert(replay_reason.detail == reason.detail);
-        assert(replay_output.content == output.content);
-        const auto& a = original.conversation();
-        const auto& b = replay.conversation();
-        assert(a.size() == b.size());
-        for (std::size_t i = 0; i < a.size(); ++i) {
-            assert(a.at(i).role() == b.at(i).role());
-            assert(a.at(i).content() == b.at(i).content());
-        }
-    }
-}
-
-int main() {
-    run_message_tests();
-    run_conversation_tests();
-    run_sentinel_scanner_tests();
-    turn_limit();
-    default_turn_limit();
-    sentinel_halt();
-    eof_shutdown();
-    blank_input();
-    script_exhaustion();
-    replay_exhaustion();
-    transcript_round_trip();
-    std::cout << "All 8 harness integration test groups passed.\n"
-              << "All 26 Project 2 test groups passed.\n";
-}
+int main(int argc, char** argv) { return mt::run_all(argc, argv); }

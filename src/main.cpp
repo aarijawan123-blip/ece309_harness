@@ -1,12 +1,26 @@
-// src/main.cpp
-// PROVIDED — do not modify. CLI parsing is handled for you; your work is
-// Conversation and SentinelScanner (see spec §2 "Note on command-line
-// arguments" and §3).
+// src/main.cpp — PROVIDED.
+//
+// Usage:
+//   miniharness [--script FILE | --replay FILE] [--save FILE]
+//               [--max-turns N] [--max-tool-steps N]
+//               [--workspace DIR] [--no-tools] [--tools]
+//
+//   --tools        print every registered tool (name, description, schema)
+//                  and exit
+//   --no-tools     run exactly like P2: no registry, no system message
+//   --workspace    root directory the file tools may touch (default:
+//                  ./workspace, created if missing)
 
 #include "harness/harness.h"
+#include "harness/transcript.h"
+#include "model/replay_client.h"
 #include "model/scripted_client.h"
+#include "tools/builtin_tools.h"
+
+#include <filesystem>
 #include <iostream>
-#include <fstream>
+#include <memory>
+#include <optional>
 #include <string>
 
 namespace {
@@ -16,84 +30,110 @@ public:
     std::string read_line() override {
         std::string line;
         std::getline(std::cin, line);
-        eof_ = std::cin.eof();
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        eof_ = std::cin.eof() && line.empty();
         return line;
     }
     bool is_eof() const override { return eof_; }
-
 private:
     bool eof_ = false;
 };
 
 class StdioOutput : public OutputSink {
 public:
-    void write(std::string_view text) override {
-        std::cout << text << std::flush;
-    }
+    void write(std::string_view text) override { std::cout << text << std::flush; }
 };
 
-const char* role_name(Role role) {
-    switch (role) {
-        case Role::System: return "system";
-        case Role::User: return "user";
-        case Role::Assistant: return "assistant";
-    }
-    return "assistant";
+std::string build_system_message(const ToolRegistry& registry) {
+    return "You are MiniHarness, a helpful assistant.\n"
+           "To use a tool, emit <|tool_call|>{\"id\":\"...\",\"name\":\"...\",\"arguments\":{...}}<|/tool_call|>\n"
+           "Available tools:\n" +
+           describe_tools(registry);
 }
 
-// Required by spec: saves the conversation in Appendix A transcript format.
-void save_transcript(const Conversation& conv, const std::string& path) {
-    std::ofstream file(path);
-    if (!file.is_open()) return;
-
-    bool first = true;
-    for (const Message* m = conv.begin(); m != conv.end(); ++m) {
-        if (!first) file << "---\n";
-        first = false;
-        file << "role: " << role_name(m->role()) << "\n";
-        file << m->content() << "\n";
-    }
+int usage(const char* argv0) {
+    std::cerr << "usage: " << argv0
+              << " [--script FILE | --replay FILE] [--save FILE] [--max-turns N]\n"
+                 "       [--max-tool-steps N] [--workspace DIR] [--no-tools] [--tools]\n";
+    return 2;
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    std::string script_path = "default.script";
-    std::string save_path;
+    std::string script_path = "scripts/greeting.script";
+    std::string replay_path, save_path, workspace_dir = "workspace";
+    bool list_tools = false, no_tools = false;
     HarnessConfig config;
 
-    // Basic CLI argument parsing.
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--script" && i + 1 < argc) script_path = argv[++i];
-        else if (arg == "--save" && i + 1 < argc) save_path = argv[++i];
-        else if (arg == "--max-turns" && i + 1 < argc) config.max_turns = std::stoi(argv[++i]);
+    try {
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            auto next = [&]() -> std::string {
+                if (i + 1 >= argc) throw std::invalid_argument("missing value for " + arg);
+                return argv[++i];
+            };
+            if      (arg == "--script")         script_path = next();
+            else if (arg == "--replay")         replay_path = next();
+            else if (arg == "--save")           save_path = next();
+            else if (arg == "--max-turns")      config.max_turns = std::stoi(next());
+            else if (arg == "--max-tool-steps") config.max_tool_steps = std::stoi(next());
+            else if (arg == "--workspace")      workspace_dir = next();
+            else if (arg == "--tools")          list_tools = true;
+            else if (arg == "--no-tools")       no_tools = true;
+            else return usage(argv[0]);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "error: " << e.what() << "\n";
+        return usage(argv[0]);
     }
 
-    StdioInput in;
-    StdioOutput out;
-
     try {
-        auto scripted_model = std::make_unique<ScriptedModelClient>(script_path);
-        // Pull the system message (if any) out of the concrete client before
-        // type-erasing it into ModelClient — Harness only needs the string,
-        // not the concrete type.
-        config.system_message = scripted_model->system_message();
+        // With --no-tools nothing from P3 is constructed, so the harness runs
+        // even before your P3 classes work.
+        std::optional<ToolRegistry> registry;
+        std::optional<ToolContext>  ctx;
+        if (!no_tools || list_tools) {
+            registry.emplace();
+            register_builtin_tools(*registry);
+        }
 
-        Harness harness(std::move(scripted_model), config);
+        if (list_tools) {
+            std::cout << describe_tools(*registry);
+            return 0;
+        }
 
-        StopReason reason = harness.run(in, out);
+        if (!no_tools) {
+            std::filesystem::create_directories(workspace_dir);
+            ctx.emplace(Workspace(workspace_dir));
+        }
+
+        std::unique_ptr<ModelClient> model;
+        if (!replay_path.empty()) model = std::make_unique<ReplayModelClient>(replay_path);
+        else                      model = std::make_unique<ScriptedModelClient>(script_path);
+
+        std::unique_ptr<Harness> harness;
+        if (no_tools) {
+            harness = std::make_unique<Harness>(std::move(model), config);
+        } else {
+            config.system_message = build_system_message(*registry);
+            harness = std::make_unique<Harness>(std::move(model), config, &*registry, &*ctx);
+        }
+
+        StdioInput in;
+        StdioOutput out;
+        StopReason reason = harness->run(in, out);
         std::cout << "[conversation ended: " << reason.detail << "]\n";
 
         if (!save_path.empty()) {
-            save_transcript(harness.conversation(), save_path);
-            std::cout << "[Transcript saved to " << save_path << "]\n";
+            if (save_transcript(harness->conversation(), save_path))
+                std::cout << "[transcript saved to " << save_path << "]\n";
+            else
+                std::cerr << "error: could not write " << save_path << "\n";
         }
-
+        return reason.kind == StopReason::Kind::ClientError ? 1 : 0;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;
     }
-
-    return 0;
 }

@@ -1,5 +1,4 @@
 // include/model/model_client.h
-// PROVIDED — do not modify. Matches the ModelClient interface in spec §3.3.
 
 #pragma once
 #include "core/conversation.h"
@@ -22,7 +21,7 @@ public:
     virtual ~ModelClient() = default;
 
     virtual void generate(const Conversation& conv, TokenSink& sink) = 0;
-
+    
     // NVI implementation provided in base
-    Message generate(const Conversation& conv);
+    Message generate(const Conversation& conv); 
 };

@@ -12,3 +12,8 @@ CMakeLists.txt text eol=lf
 *.txt text eol=lf
 *.pdf binary
 *.zip binary
+
+# Preserve Linux test fixtures on Windows checkouts.
+*.input text eol=lf
+*.args text eol=lf
+*.out text eol=lf
