@@ -5,10 +5,11 @@ provided tool execution loop. Development is being completed in separate parts.
 
 ## Current progress
 
-Parts 1–3 are complete: starter setup, migration of our own Project 2
+Parts 1–4 are complete: starter setup, migration of our own Project 2
 Conversation and SentinelScanner, and the hash-table ToolRegistry with resizing
-and measurements. Workspace::resolve and calc_evaluate are still starter stubs
-(parts 4 and 5). File operations and calculator results are not ready yet.
+and measurements, plus Workspace::resolve and path-safety tests. The provided
+file tools now work with the resolver. Calculator evaluation is still a starter
+stub (part 5).
 The full CTest suite is therefore not expected to pass at this checkpoint.
 
 ## Build on Linux / WSL
@@ -27,14 +28,18 @@ Run the checks for the completed parts:
 ```bash
 (cd build-p3 && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ./test_p2)
 (cd build-p3 && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ./test_p3 reg_)
+(cd build-p3 && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ./test_p3 ws_)
+(cd build-p3 && ./test_loop =loop_escape_attempt_is_an_error_not_a_crash)
 ./build-p3/miniharness --tools
 ./build-p3/miniharness --no-tools --script scripts/greeting.script
 ```
 
 The registry tests print the 10,000-tool measurements and weak-hash comparison.
-The current results are 14/14 P2 regression tests and 13/13 registry tests.
+The current results are 14/14 P2 regression tests, 13/13 registry tests,
+11/11 workspace tests, and the provided escape-attempt tool-loop test.
 No compiler warnings or sanitizer errors were reported. Tool listing and the
-no-tools greeting were also compared with the supplied golden output.
+no-tools greeting were also compared with the supplied golden output. The
+escape-attempt CLI session passes its golden comparison too.
 
 ## Layout
 
@@ -59,6 +64,15 @@ exceed a load factor of 1. Resizing transfers list nodes; Tool objects keep thei
 addresses. Null and duplicate registrations return false, and a duplicate's new
 tool is destroyed while the original remains registered.
 
+## Workspace path checks
+
+File paths are relative to the workspace. The resolver rejects empty paths,
+NUL bytes, absolute/rooted paths, and normalized paths beginning with `..`.
+It accepts `a/../b` as `b`, `a/..` as the workspace root, and ordinary names such
+as `my..notes.txt`. New paths can resolve even when their directories do not
+exist: normalization only examines text. The provided file tools then perform
+the separate symlink check before accessing the filesystem.
+
 ## Earlier projects and remaining work
 
 Project 1 files remain at the root and are not part of the CMake build. The
@@ -67,7 +81,7 @@ commands describe the old layout. Old P2 tests are preserved in `tests/p2_legacy
 and are not current CMake targets. The existing P2 documentation is historical.
 The P3 starter README is preserved in `docs/p3-starter-README.md`.
 
-Next: implement path resolution, implement calculator evaluation, run the full
+Next: implement calculator evaluation, run the full
 integration suite, finish the 500–800-word design log, and audit the submission.
 `github.txt` retains the real repository URL. Any existing `github.zip` is the
 older P2 backup; it must be regenerated for the final P3 submission.

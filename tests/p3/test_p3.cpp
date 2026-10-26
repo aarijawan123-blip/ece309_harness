@@ -13,6 +13,7 @@
 #include "../test_helpers.h"     // TempDir, write_text, args1, ...
 
 #include "tools/calculator.h"
+#include "tools/file_tools.h"
 #include "tools/tool_registry.h"
 #include "tools/workspace.h"
 
@@ -275,4 +276,147 @@ TEST(reg_10000_tools) {
               << ", longest chain=" << r.max_probe_length()
               << ", weak hash longest chain=" << weak_longest << '\n';
 }
+
+TEST(ws_accepts_required_paths) {
+    TempDir d;
+    Workspace ws(d.path());
+    const std::vector<std::pair<std::string, fs::path>> cases = {
+        {"notes/todo.txt", ws.root() / "notes/todo.txt"},
+        {"./notes//todo.txt", ws.root() / "notes/todo.txt"},
+        {".", ws.root()},
+        {"a/../b", ws.root() / "b"},
+        {"a/..", ws.root()},
+        {"new/dir/file.txt", ws.root() / "new/dir/file.txt"},
+        {"my..notes.txt", ws.root() / "my..notes.txt"}
+    };
+    for (const auto& item : cases) {
+        fs::path out;
+        std::string reason;
+        REQUIRE(ws.resolve(item.first, &out, &reason));
+        CHECK(out == item.second);
+    }
+    CHECK(fs::is_empty(d.path()));
+}
+
+TEST(ws_rejects_empty_path) {
+    TempDir d;
+    Workspace ws(d.path());
+    fs::path out;
+    std::string reason;
+    CHECK(!ws.resolve("", &out, &reason));
+    CHECK(reason == "empty path");
+}
+
+TEST(ws_rejects_nul_bytes) {
+    TempDir d;
+    Workspace ws(d.path());
+    const std::vector<std::string> paths = {
+        std::string("notes") + '\0' + "/x",
+        std::string(1, '\0') + "notes",
+        std::string("notes") + '\0'
+    };
+    for (const auto& path : paths) {
+        fs::path out;
+        std::string reason;
+        CHECK(!ws.resolve(path, &out, &reason));
+        CHECK(!reason.empty());
+    }
+}
+
+TEST(ws_rejects_absolute_paths) {
+    TempDir d;
+    Workspace ws(d.path());
+    const std::vector<std::string> paths = {
+        "/etc/passwd", "/", "//etc/passwd", (ws.root() / "inside.txt").string()
+    };
+    for (const auto& path : paths) {
+        fs::path out;
+        std::string reason;
+        CHECK(!ws.resolve(path, &out, &reason));
+        CHECK(!reason.empty());
+    }
+}
+
+TEST(ws_rejects_normalized_parent_paths) {
+    TempDir d;
+    Workspace ws(d.path() / "ws");
+    const std::vector<std::string> paths = {
+        "..", "../etc/passwd", "a/../../b",
+        "notes/../../ws/notes/todo.txt", "./../x", "a/b/../../../x"
+    };
+    for (const auto& path : paths) {
+        fs::path out;
+        std::string reason;
+        CHECK(!ws.resolve(path, &out, &reason));
+        CHECK(!reason.empty());
+    }
+}
+
+TEST(ws_resolves_without_existing_root) {
+    TempDir d;
+    Workspace ws(d.path() / "missing");
+    fs::path out;
+    std::string reason;
+    REQUIRE(ws.resolve("new/dir/file.txt", &out, &reason));
+    CHECK(out == ws.root() / "new/dir/file.txt");
+    CHECK(!fs::exists(ws.root()));
+}
+
+TEST(ws_uses_string_view_length) {
+    TempDir d;
+    Workspace ws(d.path());
+    std::string text = "notes.txt/../../outside";
+    fs::path out;
+    std::string reason;
+    REQUIRE(ws.resolve(std::string_view(text.data(), 9), &out, &reason));
+    CHECK(out == ws.root() / "notes.txt");
+}
+
+TEST(ws_leaves_symlinks_to_provided_check) {
+    TempDir d;
+    TempDir outside;
+    Workspace ws(d.path());
+    fs::create_directory_symlink(outside.path(), d.path() / "link");
+    fs::path out;
+    std::string reason;
+    REQUIRE(ws.resolve("link/new.txt", &out, &reason));
+    CHECK(out == ws.root() / "link/new.txt");
+    CHECK(!ws.check_symlinks(out, &reason));
+    CHECK(!reason.empty());
+    CHECK(fs::is_empty(outside.path()));
+}
+
+TEST(ws_file_tools_round_trip) {
+    TempDir d;
+    ToolContext ctx{Workspace(d.path())};
+    WriteFileTool writer;
+    ReadFileTool reader;
+    ListDirTool listing;
+    auto args = args1("path", JsonValue::string("./notes//todo.txt"));
+    args.set("content", JsonValue::string("hello\n"));
+    REQUIRE(writer.invoke(args, ctx).ok);
+    auto read = reader.invoke(args1("path", JsonValue::string("notes/todo.txt")), ctx);
+    REQUIRE(read.ok);
+    CHECK(read.content == "hello\n");
+    auto listed = listing.invoke(args1("path", JsonValue::string("notes")), ctx);
+    REQUIRE(listed.ok);
+    CHECK(listed.content == "todo.txt\t6");
+}
+
+TEST(ws_file_tools_reject_escape) {
+    TempDir d;
+    fs::create_directory(d.path() / "ws");
+    write_text(d.path() / "outside.txt", "keep");
+    ToolContext ctx{Workspace(d.path() / "ws")};
+    WriteFileTool writer;
+    ReadFileTool reader;
+    ListDirTool listing;
+    auto args = args1("path", JsonValue::string("../outside.txt"));
+    args.set("content", JsonValue::string("changed"));
+    CHECK(!writer.invoke(args, ctx).ok);
+    CHECK(!reader.invoke(args, ctx).ok);
+    CHECK(!listing.invoke(args1("path", JsonValue::string("..")), ctx).ok);
+    CHECK(read_text(d.path() / "outside.txt") == "keep");
+}
+
 int main(int argc, char** argv) { return mt::run_all(argc, argv); }

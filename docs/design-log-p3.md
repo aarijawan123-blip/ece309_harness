@@ -2,9 +2,9 @@
 
 **P2 code used:** our own Conversation and SentinelScanner, with
 USE_P2_REFERENCE=OFF. **Tools used:** Codex for specification review, starter
-migration, registry implementation, tests, and these draft notes; GCC 15.2 and
+migration, registry and workspace implementation, tests, and these draft notes; GCC 15.2 and
 CMake in WSL Ubuntu for compilation; ASan and UBSan for runtime checking.
-This is a checkpoint for parts 1–3, not the final 500–800-word submission log.
+This is a checkpoint for parts 1–4, not the final 500–800-word submission log.
 
 ## Hash table
 
@@ -69,8 +69,8 @@ Neither was a compiler or program failure.
 
 ## Remaining sections
 
-Workspace resolution and calculator evaluation are still the provided stubs.
-Their tests and full integration testing belong to later parts. Add the
+Calculator evaluation is still the provided stub. Its tests and full
+integration testing belong to later parts. Add the
 calculator stack trace, errors-as-values discussion, and hindsight section
 when those parts are complete, then revise this draft to the required word count.
 
@@ -78,3 +78,30 @@ Git's whitespace check also identified five trailing-whitespace lines in the
 unchanged provided model files; those were preserved with the starter. Added
 LF attributes for CLI fixtures so Windows checkout settings cannot change
 the expected output or inputs. Authored files pass the whitespace check.
+
+
+## Part 4: workspace resolution
+
+The request was to start and commit part 4 separately. The resolver follows
+section 4.4 in order, checking empty input and embedded NUL bytes before
+constructing a filesystem path. It rejects rooted input, normalizes the
+relative path, and rejects a leading parent component. This accepts legal
+names containing two dots without allowing an escape. A normalized dot returns
+the root itself. No filesystem operations are used in resolve, so nonexistent
+files and roots are acceptable. Path-processing exceptions become a false
+result and an error message.
+
+The new tests cover every row of the required table, with exact resolved paths
+for accepted inputs and explanations for rejected ones. Additional checks cover
+NUL bytes at either end, absolute paths inside the root, bounded string views,
+nonexistent roots, and the separation between lexical resolution and the
+provided symlink check. A real file-tool round trip writes, reads, and lists a
+file in a temporary directory; escape attempts leave an outside file unchanged.
+
+Linux testing passed all 11 workspace tests, 13 registry tests, 14 P2 regression
+tests, and the provided escape-attempt tool-loop test. The escape-attempt CLI
+session matched its supplied golden output after the same error-message
+normalization used by the provided test script. The build used warnings as
+errors, AddressSanitizer with leak detection, and UndefinedBehaviorSanitizer.
+No compiler warnings, test failures, or sanitizer findings occurred in part 4.
+The calculator and provided production files were left unchanged.
