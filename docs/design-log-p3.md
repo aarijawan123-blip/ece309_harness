@@ -4,7 +4,7 @@
 USE_P2_REFERENCE=OFF. **Tools used:** Codex for specification review, starter
 migration, registry and workspace implementation, tests, and these draft notes; GCC 15.2 and
 CMake in WSL Ubuntu for compilation; ASan and UBSan for runtime checking.
-This is a checkpoint for parts 1–5, not the final 500–800-word submission log.
+This is a checkpoint for parts 1–6, not the final 500–800-word submission log.
 
 ## Hash table
 
@@ -69,7 +69,7 @@ Neither was a compiler or program failure.
 
 ## Remaining sections
 
-Calculator evaluation is complete. Full integration testing is part 6. Add the
+Calculator evaluation and full integration testing are complete. Add the
 calculator stack trace, errors-as-values discussion, and hindsight section
 when those parts are complete, then revise this draft to the required word count.
 
@@ -127,3 +127,17 @@ operator stack. The opening parenthesis creates a boundary. Reading 3, +, and
 applies 3+4 and removes the boundary, leaving [2, 7] and [*]. When minus
 arrives, multiplication runs first, leaving [14]. The final 5 is pushed and
 subtraction produces 9. No recursive evaluation is needed.
+
+
+## Part 6: integration verification
+
+A fresh build-p3-integration directory was configured on WSL Ubuntu with our
+own P2 code, Debug mode, warnings as errors, and ASan/UBSan. All four CTest
+suites passed: 14 P2 cases, 31 P3 cases, 9 provided tool-loop cases, and 7
+provided golden CLI sessions. The complete tools demo now passes, including
+reading, calculating, writing, and listing. Malformed calls, workspace escapes,
+tool-step limits, sentinel handling, and transcript round trips were covered.
+There were no integration failures to repair or sanitizer findings to document.
+The supplied code and golden fixtures were not changed to make tests pass.
+Full reproduction instructions and the results are in integration-p3.md.
+The final design-log edit and submission archive remain for later parts.

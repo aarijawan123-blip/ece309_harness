@@ -5,9 +5,9 @@ provided tool execution loop. Development is being completed in separate parts.
 
 ## Current progress
 
-Parts 1–5 are complete: P3 starter migration, the tool registry, workspace
-path resolution, and calculator evaluation. Part 6 will verify the full
-integration suite. Documentation and the final submission audit follow.
+Parts 1–6 are complete: P3 starter migration, the tool registry, workspace
+path resolution, calculator evaluation, and full integration testing. All four
+CTest suites pass. Final documentation and the submission audit remain.
 
 ## Build on Linux / WSL
 
@@ -33,11 +33,18 @@ Run the checks for the completed parts:
 ```
 
 The registry tests print the 10,000-tool measurements and weak-hash comparison.
-The current results are 14/14 P2 regression tests, 13/13 registry tests,
-11/11 workspace tests, and the provided escape-attempt tool-loop test.
-No compiler warnings or sanitizer errors were reported. Tool listing and the
-no-tools greeting were also compared with the supplied golden output. The
-escape-attempt CLI session passes its golden comparison too.
+The complete run passes 14 P2 tests, 31 P3 tests (13 registry, 11 workspace,
+7 calculator), 9 tool-loop tests, and 7 golden CLI sessions. No compiler
+warnings or ASan/UBSan findings were reported.
+
+To run all suites together:
+
+```bash
+(cd build-p3 && ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 ctest --output-on-failure)
+```
+
+See [the part 6 verification record](docs/integration-p3.md) for the fresh-build
+command, coverage, and results.
 
 ## Layout
 
@@ -89,7 +96,7 @@ commands describe the old layout. Old P2 tests are preserved in `tests/p2_legacy
 and are not current CMake targets. The existing P2 documentation is historical.
 The P3 starter README is preserved in `docs/p3-starter-README.md`.
 
-Next: run the full
-integration suite, finish the 500–800-word design log, and audit the submission.
+Next: finish the 500–800-word design log, finalize the documentation, and
+audit the submission.
 `github.txt` retains the real repository URL. Any existing `github.zip` is the
 older P2 backup; it must be regenerated for the final P3 submission.
