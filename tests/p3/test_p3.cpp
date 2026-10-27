@@ -419,4 +419,67 @@ TEST(ws_file_tools_reject_escape) {
     CHECK(read_text(d.path() / "outside.txt") == "keep");
 }
 
+
+TEST(calc_required_examples) {
+    const std::vector<std::pair<std::string, double>> cases = {
+        {"2 + 3 * 4", 14}, {"10 - 4 - 3", 3}, {"100 / 10 / 5", 2},
+        {"(2 + 3) * 4", 20}, {"2 * (3 + 4) - 5", 9},
+        {"-3 * -3", 9}, {"7 / 2", 3.5},
+        {"18 / (2 + 1) + 0.25 * 4", 7}, {"2*-3 + (-1)", -7},
+        {"8 / 2 * 3", 12}, {"10 - 4 + 3", 9}, {"42", 42}
+    };
+    for (const auto& item : cases) {
+        double value = 0;
+        std::string error;
+        REQUIRE(eval(item.first, &value, &error));
+        CHECK(value == item.second);
+    }
+}
+
+TEST(calc_zero_divisors) {
+    for (const auto& expr : {"1 / (2 - 2)", "1 / -0", "0 / 0"}) {
+        double value = 123;
+        std::string error;
+        CHECK(!eval(expr, &value, &error));
+        CHECK(error == "division by zero");
+        CHECK(value == 123);
+    }
+}
+
+TEST(calc_long_expression) {
+    std::string expression = "1";
+    for (int i = 1; i < 20000; ++i) expression += "+1";
+    double value = 0;
+    std::string error;
+    REQUIRE(eval(expression, &value, &error));
+    CHECK(value == 20000);
+}
+
+TEST(calc_deep_parentheses) {
+    std::string expression = std::string(5000, '(') + "2+3" + std::string(5000, ')');
+    double value = 0;
+    std::string error;
+    REQUIRE(eval(expression, &value, &error));
+    CHECK(value == 5);
+}
+
+TEST(calc_malformed_tokens_do_not_crash) {
+    using K = CalcToken::Kind;
+    const CalcToken one{K::Number, 1};
+    const std::vector<std::vector<CalcToken>> cases = {
+        {}, {{K::Plus, 0}}, {one, {K::Plus, 0}}, {one, one},
+        {{K::RParen, 0}}, {{K::LParen, 0}}, {{K::LParen, 0}, one},
+        {one, {K::RParen, 0}}, {{K::LParen, 0}, {K::RParen, 0}},
+        {one, {K::Plus, 0}, {K::Times, 0}, one},
+        {{static_cast<K>(99), 0}}, {one, {K::LParen, 0}, one, {K::RParen, 0}}
+    };
+    for (const auto& tokens : cases) {
+        double value = 123;
+        std::string error;
+        CHECK(!calc_evaluate(tokens, &value, &error));
+        CHECK(!error.empty());
+        CHECK(value == 123);
+    }
+}
+
 int main(int argc, char** argv) { return mt::run_all(argc, argv); }

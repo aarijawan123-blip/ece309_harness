@@ -4,7 +4,7 @@
 USE_P2_REFERENCE=OFF. **Tools used:** Codex for specification review, starter
 migration, registry and workspace implementation, tests, and these draft notes; GCC 15.2 and
 CMake in WSL Ubuntu for compilation; ASan and UBSan for runtime checking.
-This is a checkpoint for parts 1–4, not the final 500–800-word submission log.
+This is a checkpoint for parts 1–5, not the final 500–800-word submission log.
 
 ## Hash table
 
@@ -69,8 +69,7 @@ Neither was a compiler or program failure.
 
 ## Remaining sections
 
-Calculator evaluation is still the provided stub. Its tests and full
-integration testing belong to later parts. Add the
+Calculator evaluation is complete. Full integration testing is part 6. Add the
 calculator stack trace, errors-as-values discussion, and hindsight section
 when those parts are complete, then revise this draft to the required word count.
 
@@ -105,3 +104,26 @@ normalization used by the provided test script. The build used warnings as
 errors, AddressSanitizer with leak detection, and UndefinedBehaviorSanitizer.
 No compiler warnings, test failures, or sanitizer findings occurred in part 4.
 The calculator and provided production files were left unchanged.
+
+
+## Part 5: calculator evaluation
+
+Implemented the required two-stack algorithm using std::stack. A small helper
+applies one operation, popping the right operand before the left. Incoming
+operators first apply existing operators with greater or equal precedence.
+Opening parentheses stop that process; closing parentheses apply everything
+inside the group. The tokenizer remains unchanged. A simple operand/operator
+state check also rejects malformed token sequences passed directly by tests.
+Every stack access is guarded, and the output is assigned only on success.
+
+All seven calculator tests passed in the Linux warnings-as-errors build with
+ASan leak detection and UBSan. They cover every required expression, additional
+mixed expressions, zero divisors, malformed token sequences, 20,000 additive
+terms, and 5,000 nested parentheses. No compiler or sanitizer failures occurred.
+
+For 2 * (3 + 4) - 5, the values stack first holds 2 while * waits on the
+operator stack. The opening parenthesis creates a boundary. Reading 3, +, and
+4 leaves values [2, 3, 4] and operators [*, (, +]. The closing parenthesis
+applies 3+4 and removes the boundary, leaving [2, 7] and [*]. When minus
+arrives, multiplication runs first, leaving [14]. The final 5 is pushed and
+subtraction produces 9. No recursive evaluation is needed.
